@@ -7,7 +7,12 @@ public class LetsTakeTheSubway : ModuleRules
 	public LetsTakeTheSubway(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-	
+
+		// Without this, UBT only exposes each subfolder individually, so headers would have
+		// to be included by bare filename. Adding the module root keeps includes qualified
+		// ("Grid/GridActor.h"), which says where a header lives.
+		PublicIncludePaths.Add(ModuleDirectory);
+
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

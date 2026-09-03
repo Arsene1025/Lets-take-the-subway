@@ -4,3 +4,5 @@
 #include "Modules/ModuleManager.h"
 
 IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, LetsTakeTheSubway, "LetsTakeTheSubway" );
+
+DEFINE_LOG_CATEGORY(LogLTTSGrid);
