@@ -158,6 +158,10 @@ FBoxSphereBounds UGridDebugDrawComponent::CalcBounds(const FTransform& LocalToWo
 FDebugRenderSceneProxy* UGridDebugDrawComponent::CreateDebugSceneProxy()
 {
 #if WITH_EDITOR
+	// Returning null below leaves the label delegate registered with its old text list, so
+	// always start from an empty one; InitDelegateHelper refills it when a proxy is made.
+	LabelHelper.ClearLabels();
+
 	AGridActor* Grid = Cast<AGridActor>(GetOwner());
 	if (!Grid || !Grid->bDrawGridInEditor || Grid->Cells.Num() == 0)
 	{

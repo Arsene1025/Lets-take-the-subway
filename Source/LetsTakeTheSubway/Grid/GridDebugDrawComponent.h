@@ -18,6 +18,12 @@ struct FGridLabelDrawHelper : public FDebugDrawDelegateHelper
 	/** Labels farther than this from the camera are skipped. 0 disables the cut-off. */
 	double LabelMaxDistance = 0.0;
 
+	/**
+	 * Drop the cached labels. The engine only refreshes them when a new proxy is created, so
+	 * without this a grid whose drawing was just switched off keeps showing its last labels.
+	 */
+	void ClearLabels() { ResetTexts(); }
+
 protected:
 	virtual void DrawDebugLabels(UCanvas* Canvas, APlayerController* PlayerController) override;
 };
