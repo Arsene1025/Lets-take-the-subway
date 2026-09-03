@@ -293,6 +293,7 @@ Store/Elevator 지붕 마커는 처음에 6줄로 잡았다가 **F0 바닥 셀(y
 | 에디터에서 그리드 오버레이가 안 보임 | `bDrawCellCoords`를 켜면 라벨 거리(`CoordLabelMaxDistance` 25 m)를 `FDebugRenderSceneProxy::FarClippingDistance`에 넣는데, 이 값은 **셀 쿼드까지** 잘라낸다. 카메라가 25 m 이상 물러나면 그리드 전체가 사라짐 | `FGridLabelDrawHelper`(커스텀 delegate helper)가 라벨만 거리로 걸러내고 프록시는 클리핑하지 않게 변경 |
 | 지붕 마커가 엉뚱한 셀을 막음 | `AGridBoxMarker`는 **액터 위치가 사각형 중심**(`GetMinCell` = 위치 − 크기/2). 최소 셀 중심에 놓아 네 마커가 모두 반 칸씩 어긋나 F0 바닥 셀을 막고 열차 지붕은 열림 | 네 마커를 중심 좌표로 재배치. 마커 배치 공식: `원점 + (minCell + size/2) × 100` |
 | 서쪽 계단(Stiar_B1_002) 한 단이 끊김 | 챌판 1 m = `MaxStepHeight` 100과 정확히 같아 트레이스 Z의 부동소수점 오차로 한 곳이 `> 100` | `MaxStepHeight` 100 → **110** |
+| 옵션을 꺼도 좌표 숫자가 남음 | `UDebugDrawComponent`는 프록시가 새로 만들어질 때만 라벨 델리게이트를 갱신한다. `Draw Grid In Editor`를 끄면 프록시를 만들지 않으므로 마지막 라벨 목록이 그대로 남아 계속 그려짐 | `CreateDebugSceneProxy` 진입 시 `LabelHelper.ClearLabels()`로 항상 비운 뒤 판단 |
 | Live Coding 후 PIE 크래시 | 컴포넌트 클래스 레이아웃 변경(helper 멤버 추가)을 Live Coding으로 반영한 뒤 PIE 월드 복제에서 `Cast … to Actor failed` | 에디터 종료 후 `Build.bat` 정식 빌드로 해결. **멤버를 추가·삭제하는 변경은 Live Coding 대신 정식 빌드** |
 
 최종 통계: walkable 4,504 · blocked 303 (마커 272) · stepBreaks 402.
