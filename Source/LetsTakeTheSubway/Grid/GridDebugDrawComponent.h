@@ -7,6 +7,22 @@
 #include "GridDebugDrawComponent.generated.h"
 
 /**
+ * Draws the cell coordinate labels with their own distance cut-off.
+ *
+ * The stock helper shares FDebugRenderSceneProxy::FarClippingDistance with the proxy, so
+ * clipping labels that way also clips the cell quads and the whole grid vanishes as soon as
+ * the camera backs away. Keeping the label distance here leaves the proxy unclipped.
+ */
+struct FGridLabelDrawHelper : public FDebugDrawDelegateHelper
+{
+	/** Labels farther than this from the camera are skipped. 0 disables the cut-off. */
+	double LabelMaxDistance = 0.0;
+
+protected:
+	virtual void DrawDebugLabels(UCanvas* Canvas, APlayerController* PlayerController) override;
+};
+
+/**
  * Draws the owning AGridActor's cells in editor viewports.
  *
  * A scene proxy rather than per-tick DrawDebug calls: DrawDebug primitives live for a
@@ -29,4 +45,8 @@ public:
 
 protected:
 	virtual FDebugRenderSceneProxy* CreateDebugSceneProxy() override;
+	virtual FDebugDrawDelegateHelper& GetDebugDrawDelegateHelper() override { return LabelHelper; }
+
+private:
+	FGridLabelDrawHelper LabelHelper;
 };

@@ -6,8 +6,53 @@
 #include "Grid/GridTypes.h"
 
 #include "DynamicMeshBuilder.h"
+#include "Engine/Canvas.h"
+#include "Engine/Engine.h"
+#include "Engine/Font.h"
 #include "SceneView.h"
 #include "ShowFlags.h"
+
+void FGridLabelDrawHelper::DrawDebugLabels(UCanvas* Canvas, APlayerController*)
+{
+	const FSceneView* View = Canvas ? Canvas->SceneView : nullptr;
+	if (!View || GetTexts().IsEmpty())
+	{
+		return;
+	}
+
+	const FColor OldDrawColor = Canvas->DrawColor;
+	UFont* Font = GEngine->GetSmallFont();
+	const FFontRenderInfo FontInfo = Canvas->CreateFontRenderInfo(true, true);
+
+	// Same normalised-to-canvas mapping the engine helper uses, so labels land on their cell
+	// under DPI scaling and constrained aspect ratios.
+	const float InvDPIScale = 1.0f / Canvas->GetDPIScale();
+	const FIntRect& ViewRect = View->UnscaledViewRect;
+	const float HalfWidth = ViewRect.Width() * 0.5f;
+	const float HalfHeight = ViewRect.Height() * 0.5f;
+	const FIntRect HalfDelta = (View->UnconstrainedViewRect - ViewRect) / 2;
+
+	for (const FDebugRenderSceneProxy::FText3d& Label : GetTexts())
+	{
+		if (LabelMaxDistance > 0.0 && !FDebugRenderSceneProxy::PointInRange(Label.Location, View, LabelMaxDistance))
+		{
+			continue;
+		}
+		if (!FDebugRenderSceneProxy::PointInView(Label.Location, View))
+		{
+			continue;
+		}
+
+		const FVector4 Projected = View->Project(Label.Location);
+		const float ScreenX = (HalfDelta.Width() + (1.0f + static_cast<float>(Projected.X)) * HalfWidth) * InvDPIScale;
+		const float ScreenY = (HalfDelta.Height() + (1.0f - static_cast<float>(Projected.Y)) * HalfHeight) * InvDPIScale;
+
+		Canvas->SetDrawColor(Label.Color);
+		Canvas->DrawText(Font, Label.Text, ScreenX, ScreenY, 1.0f, 1.0f, FontInfo);
+	}
+
+	Canvas->SetDrawColor(OldDrawColor);
+}
 
 namespace
 {
@@ -127,7 +172,10 @@ FDebugRenderSceneProxy* UGridDebugDrawComponent::CreateDebugSceneProxy()
 	}
 
 	FGridDebugSceneProxy* Proxy = new FGridDebugSceneProxy(this);
-	Proxy->FarClippingDistance = Grid->bDrawCellCoords ? Grid->CoordLabelMaxDistance : 0.0;
+
+	// Never set Proxy->FarClippingDistance: it would clip the cell quads too. The label
+	// distance lives on the helper instead.
+	LabelHelper.LabelMaxDistance = Grid->bDrawCellCoords ? Grid->CoordLabelMaxDistance : 0.0;
 
 	const double CellSize = Grid->CellSize;
 	const double HalfSize = CellSize * 0.5 - 4.0;	// inset so cell borders stay readable

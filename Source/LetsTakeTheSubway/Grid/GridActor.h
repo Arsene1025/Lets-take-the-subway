@@ -88,7 +88,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Grid|Debug")
 	bool bDrawCellCoords = false;
 
-	/** Coordinate labels beyond this distance are clipped. */
+	/** Coordinate labels beyond this distance are skipped. The cell quads are never clipped. */
 	UPROPERTY(EditAnywhere, Category = "Grid|Debug", meta = (ClampMin = 0.0))
 	float CoordLabelMaxDistance = 2500.0f;
 
