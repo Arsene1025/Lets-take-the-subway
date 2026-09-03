@@ -8,7 +8,7 @@
 #include "Player/GridPlayerController.h"
 
 #include "Camera/CameraComponent.h"
-#include "Components/CapsuleComponent.h"
+#include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -19,24 +19,25 @@ AGridPawn::AGridPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
-	SetRootComponent(Capsule);
-	Capsule->InitCapsuleSize(34.0f, 88.0f);
-	Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Capsule->SetCollisionResponseToAllChannels(ECR_Ignore);
-	Capsule->SetGenerateOverlapEvents(false);
+	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
+	SetRootComponent(Sphere);
+	Sphere->InitSphereRadius(BallRadius);
+	Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Sphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Sphere->SetGenerateOverlapEvents(false);
 
 	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
-	BodyMesh->SetupAttachment(Capsule);
+	BodyMesh->SetupAttachment(Sphere);
 	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BodyMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BodyMesh->SetGenerateOverlapEvents(false);
-	BodyMesh->SetRelativeScale3D(FVector(0.6, 0.6, 1.76));
+	// The engine sphere is 100 cm across, so the scale is the radius in metres.
+	BodyMesh->SetRelativeScale3D(FVector(BallRadius / 50.0f));
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (CylinderFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereFinder.Succeeded())
 	{
-		BodyMesh->SetStaticMesh(CylinderFinder.Object);
+		BodyMesh->SetStaticMesh(SphereFinder.Object);
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
@@ -46,7 +47,7 @@ AGridPawn::AGridPawn()
 	}
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
-	SpringArm->SetupAttachment(Capsule);
+	SpringArm->SetupAttachment(Sphere);
 	SpringArm->TargetArmLength = CameraArmLength;
 	SpringArm->bDoCollisionTest = false;
 	SpringArm->bUsePawnControlRotation = false;
@@ -70,6 +71,17 @@ void AGridPawn::BeginPlay()
 	{
 		SpringArm->TargetArmLength = CameraArmLength;
 		SpringArm->SetWorldRotation(CameraRotation);
+	}
+
+	// Designers may tune the radius on an instance; keep the collision-less bounds and the
+	// visible ball in step with it.
+	if (Sphere)
+	{
+		Sphere->SetSphereRadius(BallRadius);
+	}
+	if (BodyMesh)
+	{
+		BodyMesh->SetRelativeScale3D(FVector(BallRadius / 50.0f));
 	}
 
 	if (!EnsureGrid())
@@ -123,6 +135,27 @@ void AGridPawn::ReportFeedback(const FString& Message, const FLinearColor& Color
 	{
 		GridController->ShowFeedback(Message, Color);
 	}
+}
+
+void AGridPawn::RollBody(const FVector& Delta)
+{
+	if (!bRollWhileMoving || !BodyMesh || BallRadius <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// Only the horizontal travel rolls the ball; the vertical part of a stair step does not.
+	const FVector Flat(Delta.X, Delta.Y, 0.0);
+	const double Distance = Flat.Size();
+	if (Distance <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// A ball rolling along D spins about the axis Up x D, by arc length / radius.
+	const FVector Axis = FVector::CrossProduct(FVector::UpVector, Flat / Distance);
+	const double AngleRad = Distance / BallRadius;
+	BodyMesh->AddWorldRotation(FQuat(Axis, AngleRad));
 }
 
 void AGridPawn::RefreshPathDebug() const
@@ -226,8 +259,10 @@ void AGridPawn::Tick(float DeltaSeconds)
 	}
 
 	const FVector TargetLocation = CellStandLocation(NextCell);
-	const FVector NewLocation = FMath::VInterpConstantTo(GetActorLocation(), TargetLocation, DeltaSeconds, MoveSpeed);
+	const FVector OldLocation = GetActorLocation();
+	const FVector NewLocation = FMath::VInterpConstantTo(OldLocation, TargetLocation, DeltaSeconds, MoveSpeed);
 	SetActorLocation(NewLocation);
+	RollBody(NewLocation - OldLocation);
 
 	if (!NewLocation.Equals(TargetLocation, 0.5))
 	{

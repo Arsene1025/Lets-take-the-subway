@@ -8,7 +8,7 @@
 
 class AGridActor;
 class UCameraComponent;
-class UCapsuleComponent;
+class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 
@@ -18,6 +18,8 @@ class UStaticMeshComponent;
  * No CharacterMovement and no collision: position is entirely determined by the grid, so
  * physics could only fight it. Z comes from each cell's floor height, which is what makes
  * stairs and ramps work without any extra code.
+ *
+ * The body is a ball: a 1 m sphere that fits inside one grid cell and rolls as it moves.
  */
 UCLASS()
 class LETSTAKETHESUBWAY_API AGridPawn : public APawn
@@ -42,9 +44,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn", meta = (ClampMin = 1.0))
 	float MoveSpeed = 400.0f;
 
-	/** Distance from the cell floor to the actor origin. Matches the capsule half height. */
+	/** Distance from the cell floor to the actor origin. Matches the ball radius, so the ball rests on the floor. */
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn")
-	float HeightAboveFloor = 88.0f;
+	float HeightAboveFloor = 50.0f;
+
+	/** Ball radius in cm. The body mesh is a 1 m engine sphere scaled to this. */
+	UPROPERTY(EditAnywhere, Category = "Grid Pawn", meta = (ClampMin = 1.0))
+	float BallRadius = 50.0f;
+
+	/** Spin the ball mesh by the distance travelled, as a real ball would. Purely visual. */
+	UPROPERTY(EditAnywhere, Category = "Grid Pawn")
+	bool bRollWhileMoving = true;
 
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
 	float CameraArmLength = 1800.0f;
@@ -58,12 +68,13 @@ private:
 	FVector CellStandLocation(FIntPoint Cell) const;
 	void ReportFeedback(const FString& Message, const FLinearColor& Color) const;
 	void RefreshPathDebug() const;
+	void RollBody(const FVector& Delta);
 
 	UPROPERTY(Transient)
 	TObjectPtr<AGridActor> Grid;
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn")
-	TObjectPtr<UCapsuleComponent> Capsule;
+	TObjectPtr<USphereComponent> Sphere;
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn")
 	TObjectPtr<UStaticMeshComponent> BodyMesh;
