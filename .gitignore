@@ -148,3 +148,19 @@ Desktop.ini
 !Plugins/**
 
 !*.uproject
+
+# ============================================================
+# Claude Code
+# ============================================================
+
+# Personal permission / MCP approval file (per developer)
+.claude/settings.local.json
+
+# Shared project MCP config must stay tracked
+!.mcp.json
+
+# ============================================================
+# Generated solution files (UE 5.8 also emits .slnx)
+# ============================================================
+
+*.slnx
