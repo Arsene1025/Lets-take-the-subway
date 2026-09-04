@@ -130,7 +130,15 @@ UGridDebugDrawComponent::UGridDebugDrawComponent()
 
 	bIsEditorOnly = true;
 	bHiddenInGame = true;
+
+	// The engine declares this setter inside WITH_EDITORONLY_DATA, so calling it unguarded
+	// compiles in the editor target and breaks the game target. Nothing is lost by skipping
+	// it there: all the setter does is raise bIsVisualizationComponent, which is editor-only
+	// data, and bIsEditorOnly, which the line above already set.
+#if WITH_EDITORONLY_DATA
 	SetIsVisualizationComponent(true);
+#endif
+
 	SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SetGenerateOverlapEvents(false);
 	bSelectable = false;
