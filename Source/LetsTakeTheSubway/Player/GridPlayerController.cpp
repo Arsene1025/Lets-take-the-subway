@@ -10,6 +10,7 @@
 #include "Puzzle/PuzzleElevatorBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
 
+#include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -113,36 +114,82 @@ bool AGridPlayerController::TraceCursor(FHitResult& OutHit) const
 
 bool AGridPlayerController::TraceCursorToCell(FIntPoint& OutCell) const
 {
-	const AGridActor* Grid = GetGrid();
-
-	FHitResult Hit;
-	if (!Grid || !TraceCursor(Hit))
+	const FCursorPick Pick = PickUnderCursor();
+	if (Pick.Kind == FCursorPick::EKind::None)
 	{
 		return false;
 	}
 
-	OutCell = Grid->WorldToCell(Hit.Location);
-	return Grid->IsValidCell(OutCell);
+	OutCell = Pick.Cell;
+	return true;
 }
 
-APuzzleBlock* AGridPlayerController::FindBlockUnderCursor(const FHitResult& Hit) const
+FCursorPick AGridPlayerController::PickUnderCursor() const
 {
-	if (APuzzleBlock* Direct = Cast<APuzzleBlock>(Hit.GetActor()))
-	{
-		return Direct;
-	}
+	FCursorPick Pick;
 
-	// The ray may have landed on the floor beside a block's mesh, or on scenery standing in
-	// the same cell; the occupancy map is the authority on what is actually there.
 	const AGridActor* Grid = GetGrid();
-	const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
-	if (!Grid || !Subsystem)
+	if (!Grid)
 	{
-		return nullptr;
+		return Pick;
 	}
 
-	const FIntPoint Cell = Grid->WorldToCell(Hit.Location);
-	return Grid->IsValidCell(Cell) ? Subsystem->FindBlockAtCell(*Grid, Cell) : nullptr;
+	FVector WorldOrigin;
+	FVector WorldDirection;
+	if (!DeprojectMousePositionToWorld(WorldOrigin, WorldDirection))
+	{
+		return Pick;
+	}
+
+	const FVector RayEnd = WorldOrigin + WorldDirection * 100000.0;
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(LTTSGridClick), /*bTraceComplex*/ false, GetPawn());
+
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, WorldOrigin, RayEnd, Grid->TraceChannel, Params))
+	{
+		// Only the top face grabs. A block's sides face the camera and stand in front of the
+		// floor behind them, so treating a side hit as a grab would make those cells
+		// unreachable by clicking.
+		if (APuzzleBlock* Block = Cast<APuzzleBlock>(Hit.GetActor()))
+		{
+			if (Hit.ImpactNormal.Z > 0.7)
+			{
+				Pick.Kind = FCursorPick::EKind::Block;
+				Pick.Block = Block;
+				Pick.Cell = Grid->WorldToCell(Hit.Location);
+				Pick.HitLocation = Hit.Location;
+				return Pick;
+			}
+		}
+	}
+
+	// Second pass with every block ignored. Run for a side hit, for a miss, and for scenery
+	// alike, so the floor answer is produced by one rule rather than depending on what the
+	// first ray happened to touch.
+	TArray<AActor*> BlockActors;
+	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		Subsystem->GetBlockActors(BlockActors);
+	}
+	Params.AddIgnoredActors(BlockActors);
+
+	FHitResult FloorHit;
+	if (!GetWorld()->LineTraceSingleByChannel(FloorHit, WorldOrigin, RayEnd, Grid->TraceChannel, Params))
+	{
+		return Pick;
+	}
+
+	const FIntPoint Cell = Grid->WorldToCell(FloorHit.Location);
+	if (!Grid->IsValidCell(Cell))
+	{
+		return Pick;
+	}
+
+	Pick.Kind = FCursorPick::EKind::Floor;
+	Pick.Cell = Cell;
+	Pick.HitLocation = FloorHit.Location;
+	return Pick;
 }
 
 void AGridPlayerController::OnPressed()
@@ -165,35 +212,35 @@ void AGridPlayerController::OnPressed()
 		}
 	}
 
-	FHitResult Hit;
-	if (!TraceCursor(Hit))
-	{
-		ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
-		return;
-	}
+	const FCursorPick Pick = PickUnderCursor();
 
-	if (APuzzleBlock* Block = FindBlockUnderCursor(Hit))
+	if (Pick.Kind == FCursorPick::EKind::Block)
 	{
+		APuzzleBlock* Block = Pick.Block.Get();
+		if (!Block)
+		{
+			return;
+		}
+
 		// Held either way, even when the block cannot move: releasing without travel is a
 		// click, which is how an elevator is boarded.
 		DraggedBlock = Block;
-		GrabPoint = Hit.Location;
+		GrabPoint = Pick.HitLocation;
+		GrabOffset = Pick.HitLocation - Block->GetActorLocation();
 		DragAxis = Block->GetWorldMoveAxis();
-		AppliedOffset = 0;
-		LastRefusedOffset = MIN_int32;
+		bHasRefusedDir = false;
 		StepsThisDrag = 0;
 		Block->SetHeld(true);
 		return;
 	}
 
-	const FIntPoint Cell = Grid->WorldToCell(Hit.Location);
-	if (!Grid->IsValidCell(Cell))
+	if (Pick.Kind == FCursorPick::EKind::Floor)
 	{
-		ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
+		GridPawn->RequestMoveToCell(Pick.Cell);
 		return;
 	}
 
-	GridPawn->RequestMoveToCell(Cell);
+	ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
 }
 
 void AGridPlayerController::OnReleased()
@@ -245,52 +292,62 @@ void AGridPlayerController::UpdateDrag()
 		WorldOrigin + WorldDirection * 100000.0,
 		FPlane(GrabPoint, FVector::UpVector));
 
-	const FVector Delta = Cursor - GrabPoint;
+	// Measured from where the block is now rather than from where the drag started, so a
+	// free block can be led around a corner: each step is chosen afresh against the cursor.
+	const FVector Target = Cursor - GrabOffset;
+	const FVector Current = Block->GetActorLocation();
 
-	// A free block commits to whichever way the cursor first travelled half a cell, and
-	// keeps it for the rest of the drag. Without that the block would jitter between the two
-	// axes whenever the cursor moved diagonally.
-	if (DragAxis == EPuzzleMoveAxis::Both)
+	double DeltaX = (DragAxis == EPuzzleMoveAxis::AxisY) ? 0.0 : Target.X - Current.X;
+	double DeltaY = (DragAxis == EPuzzleMoveAxis::AxisX) ? 0.0 : Target.Y - Current.Y;
+
+	const double Threshold = Grid->CellSize * 0.5;
+
+	// Try the axis the cursor has pulled furthest along first. Falling back to the other one
+	// lets a block that is jammed against a wall still slide along it.
+	EGridDirection Candidates[2];
+	int32 NumCandidates = 0;
+
+	const bool bPreferX = FMath::Abs(DeltaX) >= FMath::Abs(DeltaY);
+	const double Primary = bPreferX ? DeltaX : DeltaY;
+	const double Secondary = bPreferX ? DeltaY : DeltaX;
+
+	if (FMath::Abs(Primary) >= Threshold)
 	{
-		const double Threshold = Grid->CellSize * 0.5;
-		if (FMath::Max(FMath::Abs(Delta.X), FMath::Abs(Delta.Y)) < Threshold)
+		Candidates[NumCandidates++] = bPreferX
+			? (Primary > 0.0 ? EGridDirection::East : EGridDirection::West)
+			: (Primary > 0.0 ? EGridDirection::North : EGridDirection::South);
+	}
+	if (FMath::Abs(Secondary) >= Threshold)
+	{
+		Candidates[NumCandidates++] = bPreferX
+			? (Secondary > 0.0 ? EGridDirection::North : EGridDirection::South)
+			: (Secondary > 0.0 ? EGridDirection::East : EGridDirection::West);
+	}
+
+	if (NumCandidates == 0)
+	{
+		bHasRefusedDir = false;		// cursor is back within half a cell; re-arm the message
+		return;
+	}
+
+	for (int32 Index = 0; Index < NumCandidates; ++Index)
+	{
+		if (Block->StartSlide(Candidates[Index]))
 		{
+			++StepsThisDrag;
+			bHasRefusedDir = false;
 			return;
 		}
-		DragAxis = (FMath::Abs(Delta.X) >= FMath::Abs(Delta.Y)) ? EPuzzleMoveAxis::AxisX : EPuzzleMoveAxis::AxisY;
 	}
 
-	EGridDirection Negative;
-	EGridDirection Positive;
-	if (!LTTSPuzzle::GetAxisDirections(DragAxis, Negative, Positive))
+	// Nothing moved. Report the direction the player was actually pulling towards.
+	const EGridDirection Refused = Candidates[0];
+	if (!bHasRefusedDir || LastRefusedDir != Refused)
 	{
-		return;
-	}
-
-	const double AlongAxis = (DragAxis == EPuzzleMoveAxis::AxisX) ? Delta.X : Delta.Y;
-	const int32 Desired = FMath::RoundToInt32(AlongAxis / Grid->CellSize);
-
-	if (Desired == AppliedOffset)
-	{
-		return;
-	}
-
-	const int32 Step = (Desired > AppliedOffset) ? 1 : -1;
-	const EGridDirection Dir = (Step > 0) ? Positive : Negative;
-
-	if (Block->StartSlide(Dir))
-	{
-		AppliedOffset += Step;
-		++StepsThisDrag;
-		LastRefusedOffset = MIN_int32;
-		return;
-	}
-
-	FText Reason;
-	Block->CanSlide(Dir, &Reason);
-	if (Desired != LastRefusedOffset)
-	{
-		LastRefusedOffset = Desired;
+		FText Reason;
+		Block->CanSlide(Refused, &Reason);
+		LastRefusedDir = Refused;
+		bHasRefusedDir = true;
 		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
 	}
 }
@@ -306,10 +363,10 @@ void AGridPlayerController::FinishDrag()
 	}
 
 	const int32 Steps = StepsThisDrag;
-	AppliedOffset = 0;
 	StepsThisDrag = 0;
-	LastRefusedOffset = MIN_int32;
+	bHasRefusedDir = false;
 	DragAxis = EPuzzleMoveAxis::None;
+	GrabOffset = FVector::ZeroVector;
 
 	Block->SetHeld(false);
 
@@ -357,47 +414,82 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	// Run before the drag and the hover so both see the heights the player is looking at.
+	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		const AGridPawn* GridPawn = GetGridPawn();
+		const float SweepRadius = GridPawn ? GridPawn->BallRadius * 0.5f : 25.0f;
+		const FVector CameraLocation = PlayerCameraManager
+			? PlayerCameraManager->GetCameraLocation()
+			: FVector::ZeroVector;
+
+		Subsystem->UpdateOcclusion(CameraLocation, GridPawn, SweepRadius);
+	}
+
 	if (DraggedBlock.IsValid())
 	{
 		UpdateDrag();
 	}
 
-	if (!LTTSGridDebug::ShouldDrawWorld())
-	{
-		if (bHadHover)
-		{
-			FGridRuntimeDebugDrawer::ClearHover(GetWorld());
-			bHadHover = false;
-			LastHoveredCell = FIntPoint(MIN_int32, MIN_int32);
-		}
-		return;
-	}
+	UpdateHover();
+}
 
+void AGridPlayerController::UpdateHover()
+{
 	const AGridActor* Grid = GetGrid();
-	if (!Grid)
-	{
-		return;
-	}
 
-	FIntPoint Cell;
-	if (!TraceCursorToCell(Cell))
+	auto Clear = [this]()
 	{
 		if (bHadHover)
 		{
 			FGridRuntimeDebugDrawer::ClearHover(GetWorld());
 			bHadHover = false;
 			LastHoveredCell = FIntPoint(MIN_int32, MIN_int32);
+			LastHoverKind = FCursorPick::EKind::None;
+			LastHoveredBlock.Reset();
 		}
+	};
+
+	if (!LTTSGridDebug::ShouldDrawWorld() || !Grid)
+	{
+		Clear();
 		return;
 	}
 
-	// Only redraw when the hovered cell actually changes: the batch is persistent.
-	if (bHadHover && Cell == LastHoveredCell)
+	const FCursorPick Pick = PickUnderCursor();
+	if (Pick.Kind == FCursorPick::EKind::None)
+	{
+		Clear();
+		return;
+	}
+
+	// The batch is persistent, so only redraw when the answer actually changes.
+	if (bHadHover
+		&& Pick.Kind == LastHoverKind
+		&& Pick.Cell == LastHoveredCell
+		&& Pick.Block == LastHoveredBlock)
 	{
 		return;
 	}
 
-	FGridRuntimeDebugDrawer::DrawHover(GetWorld(), *Grid, Cell, Grid->CanPawnEnter(Cell, GetPawn()));
-	LastHoveredCell = Cell;
+	if (Pick.Kind == FCursorPick::EKind::Block)
+	{
+		if (const APuzzleBlock* Block = Pick.Block.Get())
+		{
+			// The whole footprint, so the player can see what they are about to take hold of
+			// rather than the single cell the ray happened to land in.
+			TArray<FIntPoint> Cells;
+			Block->GetRect().GatherCells(Cells);
+			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
+		}
+	}
+	else
+	{
+		FGridRuntimeDebugDrawer::DrawHover(GetWorld(), *Grid, Pick.Cell, Grid->CanPawnEnter(Pick.Cell, GetPawn()));
+	}
+
+	LastHoveredCell = Pick.Cell;
+	LastHoverKind = Pick.Kind;
+	LastHoveredBlock = Pick.Block;
 	bHadHover = true;
 }

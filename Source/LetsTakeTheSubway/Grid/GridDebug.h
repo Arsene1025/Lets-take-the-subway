@@ -31,6 +31,10 @@ struct FGridRuntimeDebugDrawer
 	static void ClearPath(UWorld* World);
 
 	static void DrawHover(UWorld* World, const AGridActor& Grid, FIntPoint Cell, bool bEnterable);
+
+	/** Outline several cells at once, for hovering something that covers a footprint. */
+	static void DrawHoverCells(UWorld* World, const AGridActor& Grid, const TArray<FIntPoint>& Cells, bool bEnterable);
+
 	static void ClearHover(UWorld* World);
 
 	static void ClearAll(UWorld* World);

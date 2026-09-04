@@ -86,6 +86,11 @@ void AGridHUD::DrawHUD()
 		FString Status = FString::Printf(TEXT("Blocks %d   occupied cells %d"),
 			Puzzle->GetNumBlocks(), Grid ? Grid->GetNumOccupiedCells() : 0);
 
+		if (const int32 Hidden = Puzzle->GetNumOccludingBlocks())
+		{
+			Status += FString::Printf(TEXT("   hidden by %d"), Hidden);
+		}
+
 		if (Puzzle->IsInputLocked())
 		{
 			Status += TEXT("   [pieces moving]");

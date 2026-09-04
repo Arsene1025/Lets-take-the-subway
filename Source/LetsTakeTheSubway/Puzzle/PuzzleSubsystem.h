@@ -56,6 +56,20 @@ public:
 
 	APuzzleBlock* FindBlockAtCell(const AGridActor& Grid, FIntPoint Cell) const;
 
+	/** Every live block as a plain actor, for a trace that needs to see past all of them. */
+	void GetBlockActors(TArray<AActor*>& OutActors) const;
+
+	/**
+	 * Work out which blocks stand between the camera and the pawn, and flatten them.
+	 *
+	 * The camera is fixed at a steep angle, so a three-metre elevator hides roughly two cells
+	 * of floor behind it. Rather than moving the camera, the offenders are pressed down to a
+	 * slab for as long as they are in the way.
+	 */
+	void UpdateOcclusion(const FVector& CameraLocation, const APawn* Pawn, float SweepRadius);
+
+	int32 GetNumOccludingBlocks() const { return NumOccludingBlocks; }
+
 	/** The cell the pawn stands on plus the one it is walking into, if any. */
 	void GetPawnReservedCells(TArray<FIntPoint>& OutCells) const;
 
@@ -74,4 +88,6 @@ public:
 private:
 	TArray<TWeakObjectPtr<APuzzleBlock>> Blocks;
 	TArray<TWeakObjectPtr<APuzzleRotationTile>> Tiles;
+
+	int32 NumOccludingBlocks = 0;
 };

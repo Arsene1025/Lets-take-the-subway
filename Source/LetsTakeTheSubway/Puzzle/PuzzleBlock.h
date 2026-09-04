@@ -50,9 +50,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 1, ClampMax = 16))
 	FIntPoint FootprintSize = FIntPoint(1, 3);
 
-	/** Which way the block may be pushed, in the block's own frame. */
+	/**
+	 * Which way the block may be pushed, in the block's own frame.
+	 *
+	 * Free on both axes by default, matching the design's "slides in all four directions"
+	 * basic object. Pin it to one axis for a piece that should behave like a Rush Hour car.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
-	EPuzzleMoveAxis MoveAxis = EPuzzleMoveAxis::AxisY;
+	EPuzzleMoveAxis MoveAxis = EPuzzleMoveAxis::Both;
 
 	/** Visual height in cm. Does not affect the puzzle -- the grid is two-dimensional. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 10.0))
@@ -61,6 +66,14 @@ public:
 	/** Slide speed in cm/s. One 1 m cell at 600 takes about a sixth of a second. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 1.0))
 	float SlideSpeed = 600.0f;
+
+	/** Height the block shrinks to while it is hiding the pawn. */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Cutaway", meta = (ClampMin = 1.0))
+	float CutawaySlabHeight = 20.0f;
+
+	/** Seconds to press the block down, and to let it back up. */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Cutaway", meta = (ClampMin = 0.01))
+	float CutawayBlendTime = 0.15f;
 
 	// ---------------------------------------------------------------- Queries
 
@@ -74,12 +87,36 @@ public:
 
 	FGridRect GetRect() const { return FGridRect(MinCell, GetWorldFootprint()); }
 
+	/**
+	 * The volume the block would fill at its authored height, whatever it is drawn at now.
+	 *
+	 * Deliberately independent of the cutaway: the occlusion test that decides whether to
+	 * flatten a block reads this, and if it read the current height instead, a flattened
+	 * block would stop occluding, stand up, occlude again, and oscillate every frame.
+	 */
+	FBox GetFullBounds() const;
+
 	/** Which way this block may be pushed right now, after any rotation. */
 	virtual EPuzzleMoveAxis GetWorldMoveAxis() const;
 
 	bool IsAnimating() const { return AnimState != EAnimState::Idle; }
 
 	bool IsHeld() const { return bHeld; }
+
+	// ---------------------------------------------------------------- Cutaway
+
+	/** Ask the block to flatten (or to stand back up). Blended, so repeated calls are cheap. */
+	void SetCutaway(bool bInCutaway);
+
+	bool IsCutaway() const { return bCutawayTarget; }
+
+	/**
+	 * Height the body is drawn at right now.
+	 *
+	 * The collision travels with the mesh, so a flattened block is genuinely a slab: its top
+	 * face is still up and still grabbable, just lower down.
+	 */
+	float GetVisualHeight() const { return FMath::Lerp(Height, CutawaySlabHeight, CutawayAlpha); }
 
 	/** Height of the floor the block stands on. Captured once, at BeginPlay. */
 	double GetFloorZ() const { return FloorZ; }
@@ -152,6 +189,11 @@ private:
 	void ReportAtRest();
 
 	EAnimState AnimState = EAnimState::Idle;
+
+	bool bCutawayTarget = false;
+
+	/** 0 at full height, 1 fully flattened. */
+	float CutawayAlpha = 0.0f;
 
 	double FloorZ = 0.0;
 

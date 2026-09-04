@@ -68,6 +68,29 @@ EPuzzleMoveAxis APuzzleBlock::GetWorldMoveAxis() const
 	return LTTSPuzzle::RotateAxis(MoveAxis, QuarterTurns);
 }
 
+FBox APuzzleBlock::GetFullBounds() const
+{
+	if (!Grid)
+	{
+		return FBox(ForceInit);
+	}
+
+	const FGridRect Rect = GetRect();
+	const FVector Origin = Grid->GetGridOrigin();
+
+	const FVector Min(
+		Origin.X + Rect.Min.X * Grid->CellSize,
+		Origin.Y + Rect.Min.Y * Grid->CellSize,
+		FloorZ);
+
+	const FVector Max(
+		Origin.X + Rect.MaxExclusive().X * Grid->CellSize,
+		Origin.Y + Rect.MaxExclusive().Y * Grid->CellSize,
+		FloorZ + Height);
+
+	return FBox(Min, Max);
+}
+
 // ---------------------------------------------------------------------------- Placement
 
 void APuzzleBlock::RefreshVisual()
@@ -80,11 +103,25 @@ void APuzzleBlock::RefreshVisual()
 	// The footprint is authored in the local frame and the actor's yaw carries the rotation,
 	// so the mesh is always sized from the unrotated size.
 	const double CellSize = Grid ? Grid->CellSize : 100.0;
-	BodyMesh->SetRelativeLocation(FVector(0.0, 0.0, Height * 0.5));
+	const double VisualHeight = GetVisualHeight();
+
+	BodyMesh->SetRelativeLocation(FVector(0.0, 0.0, VisualHeight * 0.5));
 	BodyMesh->SetRelativeScale3D(FVector(
 		FootprintSize.X * CellSize / 100.0,
 		FootprintSize.Y * CellSize / 100.0,
-		Height / 100.0));
+		VisualHeight / 100.0));
+}
+
+void APuzzleBlock::SetCutaway(bool bInCutaway)
+{
+	if (bCutawayTarget == bInCutaway)
+	{
+		return;
+	}
+
+	bCutawayTarget = bInCutaway;
+
+	UE_LOG(LogLTTSGrid, Verbose, TEXT("%s: cutaway %s."), *GetName(), bInCutaway ? TEXT("on") : TEXT("off"));
 }
 
 void APuzzleBlock::ClaimCells()
@@ -335,6 +372,15 @@ void APuzzleBlock::BeginRotation(const FVector& Pivot, int32 TurnSign, float Dur
 void APuzzleBlock::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// Cutaway is independent of sliding and rotating: a block can be shoved aside while it
+	// is flattened, and it should stay flattened for as long as it is in the way.
+	const float TargetAlpha = bCutawayTarget ? 1.0f : 0.0f;
+	if (!FMath::IsNearlyEqual(CutawayAlpha, TargetAlpha))
+	{
+		CutawayAlpha = FMath::FInterpConstantTo(CutawayAlpha, TargetAlpha, DeltaSeconds, 1.0f / FMath::Max(CutawayBlendTime, 0.01f));
+		RefreshVisual();
+	}
 
 	switch (AnimState)
 	{

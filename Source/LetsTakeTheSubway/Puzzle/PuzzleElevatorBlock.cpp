@@ -66,19 +66,23 @@ void APuzzleElevatorBlock::RefreshVisual()
 	const double HalfY = FootprintSize.Y * CellSize * 0.5;
 	const double Thickness = 20.0;
 
+	// Measured against the height the body is currently drawn at, so the door goes down with
+	// the block when it flattens instead of floating above the slab.
+	const double VisualHeight = GetVisualHeight();
+
 	// Pushed a half thickness further out so the slab stands proud of the body rather than
 	// half sunk into it, where it would read as a seam.
 	const FIntPoint Offset = LTTSGrid::DirOffset(DoorDirection);
 	const FVector Location(
 		Offset.X * (HalfX + Thickness * 0.5),
 		Offset.Y * (HalfY + Thickness * 0.5),
-		Height * 0.4);
+		VisualHeight * 0.4);
 
 	const bool bAlongX = (Offset.X != 0);
 	const FVector Scale(
 		bAlongX ? Thickness / 100.0 : FootprintSize.X * CellSize * 0.7 / 100.0,
 		bAlongX ? FootprintSize.Y * CellSize * 0.7 / 100.0 : Thickness / 100.0,
-		Height * 0.6 / 100.0);
+		VisualHeight * 0.6 / 100.0);
 
 	DoorMesh->SetRelativeLocation(Location);
 	DoorMesh->SetRelativeScale3D(Scale);

@@ -93,6 +93,72 @@ APuzzleBlock* UPuzzleSubsystem::FindBlockAtCell(const AGridActor& Grid, FIntPoin
 	return Cast<APuzzleBlock>(Grid.GetOccupant(Cell));
 }
 
+void UPuzzleSubsystem::GetBlockActors(TArray<AActor*>& OutActors) const
+{
+	OutActors.Reserve(OutActors.Num() + Blocks.Num());
+	for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
+	{
+		if (APuzzleBlock* Block = Entry.Get())
+		{
+			OutActors.Add(Block);
+		}
+	}
+}
+
+void UPuzzleSubsystem::UpdateOcclusion(const FVector& CameraLocation, const APawn* Pawn, float SweepRadius)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	TSet<const APuzzleBlock*> Blocking;
+
+	if (Pawn)
+	{
+		// Tested against each block's authored volume rather than by tracing its collision.
+		// A physics sweep would read the flattened mesh, so a block that ducked out of the
+		// way would immediately stop occluding, stand up, and occlude again every frame.
+		const FVector PawnLocation = Pawn->GetActorLocation();
+		const FVector Extent(FMath::Max(SweepRadius, 1.0f));
+
+		for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
+		{
+			const APuzzleBlock* Block = Entry.Get();
+			if (!Block)
+			{
+				continue;
+			}
+
+			const FBox Bounds = Block->GetFullBounds();
+			if (!Bounds.IsValid)
+			{
+				continue;
+			}
+
+			FVector HitLocation;
+			FVector HitNormal;
+			float HitTime = 0.0f;
+			if (FMath::LineExtentBoxIntersection(Bounds, CameraLocation, PawnLocation, Extent, HitLocation, HitNormal, HitTime))
+			{
+				Blocking.Add(Block);
+			}
+		}
+	}
+
+	NumOccludingBlocks = Blocking.Num();
+
+	// Every block is told either way, so one that stopped blocking stands back up.
+	for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
+	{
+		if (APuzzleBlock* Block = Entry.Get())
+		{
+			Block->SetCutaway(Blocking.Contains(Block));
+		}
+	}
+}
+
 AGridPawn* UPuzzleSubsystem::GetGridPawn() const
 {
 	const UWorld* World = GetWorld();
