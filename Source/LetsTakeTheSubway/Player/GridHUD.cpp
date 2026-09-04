@@ -6,6 +6,7 @@
 #include "Grid/GridDebug.h"
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
+#include "Puzzle/PuzzleSubsystem.h"
 
 #include "Engine/Engine.h"
 
@@ -32,7 +33,9 @@ void AGridHUD::DrawHUD()
 	DrawText(TEXT("GRID MOVEMENT"), FLinearColor::White, X, Y, GEngine->GetMediumFont(), 1.1f);
 	Y += LineHeight * 1.4f;
 
-	DrawText(TEXT("Left Click: move to cell"), Label, X, Y);
+	DrawText(TEXT("Left Click: move to cell   Left Drag: push a block"), Label, X, Y);
+	Y += LineHeight;
+	DrawText(TEXT("Click the elevator from a door-side cell to board"), Label, X, Y);
 	Y += LineHeight;
 	DrawText(TEXT("Console: ltts.GridDebug 0 | 1 | 2"), Label, X, Y);
 	Y += LineHeight * 1.4f;
@@ -76,6 +79,24 @@ void AGridHUD::DrawHUD()
 				Label, X, Y);
 			Y += LineHeight;
 		}
+	}
+
+	if (const UPuzzleSubsystem* Puzzle = UPuzzleSubsystem::Get(this))
+	{
+		FString Status = FString::Printf(TEXT("Blocks %d   occupied cells %d"),
+			Puzzle->GetNumBlocks(), Grid ? Grid->GetNumOccupiedCells() : 0);
+
+		if (Puzzle->IsInputLocked())
+		{
+			Status += TEXT("   [pieces moving]");
+		}
+		else if (GridController && GridController->IsDraggingBlock())
+		{
+			Status += TEXT("   ") + GridController->GetDragStatusText();
+		}
+
+		DrawText(Status, Label, X, Y);
+		Y += LineHeight;
 	}
 
 	if (GridController && !GridController->GetFeedbackText().IsEmpty())
