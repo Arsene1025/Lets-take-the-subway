@@ -27,6 +27,15 @@ APuzzleElevatorBlock::APuzzleElevatorBlock()
 	{
 		DoorMesh->SetStaticMesh(CubeFinder.Object);
 	}
+
+	// A different greybox material, because the door is the one feature of this block the
+	// player has to read at a glance to know which way it can travel.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DoorMaterialFinder(
+		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_F0.MI_GreyBox_F0"));
+	if (DoorMaterialFinder.Succeeded())
+	{
+		DoorMesh->SetMaterial(0, DoorMaterialFinder.Object);
+	}
 }
 
 EGridDirection APuzzleElevatorBlock::GetWorldDoorDirection() const
@@ -55,18 +64,20 @@ void APuzzleElevatorBlock::RefreshVisual()
 	const double CellSize = 100.0;
 	const double HalfX = FootprintSize.X * CellSize * 0.5;
 	const double HalfY = FootprintSize.Y * CellSize * 0.5;
-	const double Thickness = 12.0;
+	const double Thickness = 20.0;
 
+	// Pushed a half thickness further out so the slab stands proud of the body rather than
+	// half sunk into it, where it would read as a seam.
 	const FIntPoint Offset = LTTSGrid::DirOffset(DoorDirection);
 	const FVector Location(
-		Offset.X * HalfX,
-		Offset.Y * HalfY,
+		Offset.X * (HalfX + Thickness * 0.5),
+		Offset.Y * (HalfY + Thickness * 0.5),
 		Height * 0.4);
 
 	const bool bAlongX = (Offset.X != 0);
 	const FVector Scale(
-		bAlongX ? Thickness / 100.0 : FootprintSize.X * CellSize * 0.8 / 100.0,
-		bAlongX ? FootprintSize.Y * CellSize * 0.8 / 100.0 : Thickness / 100.0,
+		bAlongX ? Thickness / 100.0 : FootprintSize.X * CellSize * 0.7 / 100.0,
+		bAlongX ? FootprintSize.Y * CellSize * 0.7 / 100.0 : Thickness / 100.0,
 		Height * 0.6 / 100.0);
 
 	DoorMesh->SetRelativeLocation(Location);

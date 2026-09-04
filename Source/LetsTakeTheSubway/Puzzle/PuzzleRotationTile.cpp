@@ -65,17 +65,19 @@ void APuzzleRotationTile::RefreshVisual()
 	const double CellSize = Grid ? Grid->CellSize : 100.0;
 	const double Span = SizeInCells * CellSize / 100.0;
 
+	// The editor grid overlay draws its cell quads 2 cm above the floor, so a pad lying flat
+	// on the floor is coplanar with them and tears apart in the viewport. Sit clear of both.
 	if (PadMesh)
 	{
-		PadMesh->SetRelativeLocation(FVector(0.0, 0.0, 1.0));
-		PadMesh->SetRelativeScale3D(FVector(Span, Span, 0.02));
+		PadMesh->SetRelativeLocation(FVector(0.0, 0.0, 5.0));
+		PadMesh->SetRelativeScale3D(FVector(Span, Span, 0.04));
 	}
 
 	if (CornerMesh)
 	{
 		const double Inset = (SizeInCells - 1) * CellSize * 0.5;
-		CornerMesh->SetRelativeLocation(FVector(Inset, Inset, 4.0));
-		CornerMesh->SetRelativeScale3D(FVector(CellSize / 200.0, CellSize / 200.0, 0.06));
+		CornerMesh->SetRelativeLocation(FVector(Inset, Inset, 14.0));
+		CornerMesh->SetRelativeScale3D(FVector(CellSize / 200.0, CellSize / 200.0, 0.12));
 	}
 }
 
