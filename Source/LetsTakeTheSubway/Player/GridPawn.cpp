@@ -194,6 +194,40 @@ void AGridPawn::RequestMoveToCell(FIntPoint Goal)
 	PlanPath(Goal);
 }
 
+void AGridPawn::StopAndSnapToCurrentCell(const FString& Reason, const FLinearColor& Color)
+{
+	Path.Reset();
+	GoalCell = CurrentCell;
+	PendingGoal.Reset();
+
+	if (Grid)
+	{
+		SetActorLocation(CellStandLocation(CurrentCell));
+	}
+
+	ReportFeedback(
+		FString::Printf(TEXT("Stopped at (%d,%d): %s"), CurrentCell.X, CurrentCell.Y, *Reason),
+		Color);
+
+	RefreshPathDebug();
+}
+
+void AGridPawn::TeleportToCell(FIntPoint Cell)
+{
+	Path.Reset();
+	PendingGoal.Reset();
+
+	CurrentCell = Cell;
+	GoalCell = Cell;
+
+	if (Grid)
+	{
+		SetActorLocation(CellStandLocation(Cell));
+	}
+
+	RefreshPathDebug();
+}
+
 bool AGridPawn::PlanPath(FIntPoint Goal)
 {
 	if (Goal == CurrentCell)
@@ -247,14 +281,7 @@ void AGridPawn::Tick(float DeltaSeconds)
 	FText DeniedMessage;
 	if (!Grid->CanPawnEnter(NextCell, this, &DeniedMessage))
 	{
-		Path.Reset();
-		GoalCell = CurrentCell;
-		PendingGoal.Reset();
-		SetActorLocation(CellStandLocation(CurrentCell));
-		ReportFeedback(
-			FString::Printf(TEXT("Stopped at (%d,%d): %s"), CurrentCell.X, CurrentCell.Y, *DeniedMessage.ToString()),
-			FLinearColor(1.0f, 0.65f, 0.05f));
-		RefreshPathDebug();
+		StopAndSnapToCurrentCell(DeniedMessage.ToString());
 		return;
 	}
 

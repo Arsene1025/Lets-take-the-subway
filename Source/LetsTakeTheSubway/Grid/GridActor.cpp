@@ -61,10 +61,93 @@ bool AGridActor::IsCellWalkableStatic(FIntPoint Cell) const
 		|| Data->Type == EGridCellType::Conditional;
 }
 
+// ---------------------------------------------------------------------------- Occupancy
+
+bool AGridActor::SetOccupant(FIntPoint Cell, AActor* Occupant)
+{
+	if (!Occupant || !IsValidCell(Cell))
+	{
+		return false;
+	}
+
+	const int32 Index = CellToIndex(Cell);
+	if (const TWeakObjectPtr<AActor>* Existing = Occupants.Find(Index))
+	{
+		const AActor* Holder = Existing->Get();
+		if (Holder && Holder != Occupant)
+		{
+			return false;
+		}
+	}
+
+	Occupants.Add(Index, Occupant);
+	return true;
+}
+
+void AGridActor::ClearOccupant(FIntPoint Cell, const AActor* Expected)
+{
+	if (!IsValidCell(Cell))
+	{
+		return;
+	}
+
+	const int32 Index = CellToIndex(Cell);
+	if (const TWeakObjectPtr<AActor>* Existing = Occupants.Find(Index))
+	{
+		// A stale entry (the holder was destroyed) is cleared by anyone, so a block that
+		// leaves the level cannot leave cells permanently unwalkable.
+		const AActor* Holder = Existing->Get();
+		if (!Holder || Holder == Expected)
+		{
+			Occupants.Remove(Index);
+		}
+	}
+}
+
+void AGridActor::ClearAllOccupantsOf(const AActor* Occupant)
+{
+	for (auto It = Occupants.CreateIterator(); It; ++It)
+	{
+		const AActor* Holder = It.Value().Get();
+		if (!Holder || Holder == Occupant)
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+AActor* AGridActor::GetOccupant(FIntPoint Cell) const
+{
+	if (!IsValidCell(Cell))
+	{
+		return nullptr;
+	}
+
+	const TWeakObjectPtr<AActor>* Existing = Occupants.Find(CellToIndex(Cell));
+	return Existing ? Existing->Get() : nullptr;
+}
+
+bool AGridActor::IsCellOccupied(FIntPoint Cell, const AActor* Ignore) const
+{
+	const AActor* Holder = GetOccupant(Cell);
+	return Holder != nullptr && Holder != Ignore;
+}
+
 bool AGridActor::CanPawnEnter(FIntPoint Cell, const APawn* Pawn, FText* OutDeniedMessage) const
 {
 	const FGridCellData* Data = GetCell(Cell);
 	if (!Data || !IsCellWalkableStatic(Cell))
+	{
+		if (OutDeniedMessage)
+		{
+			*OutDeniedMessage = DescribeCell(Cell, Pawn);
+		}
+		return false;
+	}
+
+	// Checked before the Conditional rule so a rule never runs for a cell that a block is
+	// standing on anyway -- rules are called many times per path search.
+	if (IsCellOccupied(Cell))
 	{
 		if (OutDeniedMessage)
 		{
@@ -97,6 +180,24 @@ FText AGridActor::DescribeCell(FIntPoint Cell, const APawn* Pawn) const
 		return NSLOCTEXT("LTTSGrid", "CellOffGrid", "Outside the grid.");
 	}
 
+	if (!IsCellWalkableStatic(Cell))
+	{
+		const UEnum* ReasonEnum = StaticEnum<EGridBlockReason>();
+		return ReasonEnum
+			? ReasonEnum->GetDisplayNameTextByValue(static_cast<int64>(Data->BlockReason))
+			: NSLOCTEXT("LTTSGrid", "CellBlocked", "Blocked.");
+	}
+
+	// Reported from the enum rather than from the cell: the reason is a runtime occupant,
+	// so it is never stored in BlockReason.
+	if (IsCellOccupied(Cell))
+	{
+		const UEnum* ReasonEnum = StaticEnum<EGridBlockReason>();
+		return ReasonEnum
+			? ReasonEnum->GetDisplayNameTextByValue(static_cast<int64>(EGridBlockReason::Object))
+			: NSLOCTEXT("LTTSGrid", "CellOccupied", "Blocked by object.");
+	}
+
 	if (Data->Type == EGridCellType::Conditional && ConditionalRules.IsValidIndex(Data->RuleIndex))
 	{
 		if (const UGridCellRule* Rule = ConditionalRules[Data->RuleIndex])
@@ -108,15 +209,7 @@ FText AGridActor::DescribeCell(FIntPoint Cell, const APawn* Pawn) const
 		}
 	}
 
-	if (IsCellWalkableStatic(Cell))
-	{
-		return FText::GetEmpty();
-	}
-
-	const UEnum* ReasonEnum = StaticEnum<EGridBlockReason>();
-	return ReasonEnum
-		? ReasonEnum->GetDisplayNameTextByValue(static_cast<int64>(Data->BlockReason))
-		: NSLOCTEXT("LTTSGrid", "CellBlocked", "Blocked.");
+	return FText::GetEmpty();
 }
 
 bool AGridActor::FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const APawn* Pawn, FIntPoint& OutCell) const
@@ -211,6 +304,10 @@ void AGridActor::GenerateFromTraces()
 	// Markers carry no collision, but ignoring every editor-only actor also covers any
 	// visualiser someone adds later. In a game world (bRegenerateOnPlay) ignore pawns
 	// instead, so a pawn standing on the floor cannot mask the floor under itself.
+	//
+	// Tagged actors are movable props -- puzzle blocks. They stand on the floor and would
+	// otherwise bake themselves in as Blocked cells at whatever position they were authored
+	// at, so the floor beneath them must be traced as if they were not there.
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
@@ -218,7 +315,7 @@ void AGridActor::GenerateFromTraces()
 		{
 			continue;
 		}
-		if (Actor->IsEditorOnly() || Actor->IsA<APawn>())
+		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()))
 		{
 			Params.AddIgnoredActor(Actor);
 		}

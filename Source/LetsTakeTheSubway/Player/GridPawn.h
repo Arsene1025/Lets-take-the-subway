@@ -41,6 +41,24 @@ public:
 	int32 GetRemainingSteps() const { return Path.Num(); }
 	AGridActor* GetGrid() const { return Grid; }
 
+	/**
+	 * The cell the pawn is walking into, if any.
+	 *
+	 * Together with the current cell this is the pawn's footprint for the next moment, which
+	 * is what a sliding block has to stay out of: the pawn is between two cells for most of
+	 * a step, and shoving a block into the one it is committed to would leave it inside.
+	 */
+	TOptional<FIntPoint> GetNextCell() const
+	{
+		return Path.IsEmpty() ? TOptional<FIntPoint>() : TOptional<FIntPoint>(Path[0]);
+	}
+
+	/** Abandon the current route and settle back onto the cell last fully entered. */
+	void StopAndSnapToCurrentCell(const FString& Reason, const FLinearColor& Color = FLinearColor(1.0f, 0.65f, 0.05f));
+
+	/** Move the pawn to a cell outright. Used when a rotating space carries it along. */
+	void TeleportToCell(FIntPoint Cell);
+
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn", meta = (ClampMin = 1.0))
 	float MoveSpeed = 400.0f;
 

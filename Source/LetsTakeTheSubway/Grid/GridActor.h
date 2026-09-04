@@ -211,6 +211,31 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Grid")
 	bool IsCellWalkableStatic(FIntPoint Cell) const;
 
+	// ---------------------------------------------------------------- Runtime occupancy
+	//
+	// Which cells a moving actor is standing on right now. Separate from Cells because that
+	// array is baked in the editor and serialized into the map, while this changes every
+	// time a puzzle block slides. Routing it through CanPawnEnter means pathfinding, the
+	// pawn's per-step recheck and the hover overlay all become block-aware for free.
+	//
+	// Deliberately typed as AActor: the grid stays ignorant of the puzzle classes, so the
+	// dependency runs one way and any future movable actor can register the same way.
+
+	/** Claim a cell. Fails when someone else already holds it. */
+	bool SetOccupant(FIntPoint Cell, AActor* Occupant);
+
+	/** Release a cell, but only if Expected still holds it. */
+	void ClearOccupant(FIntPoint Cell, const AActor* Expected);
+
+	/** Release every cell held by an actor. Used when it moves or leaves the level. */
+	void ClearAllOccupantsOf(const AActor* Occupant);
+
+	AActor* GetOccupant(FIntPoint Cell) const;
+
+	bool IsCellOccupied(FIntPoint Cell, const AActor* Ignore = nullptr) const;
+
+	int32 GetNumOccupiedCells() const { return Occupants.Num(); }
+
 	/** Static walkability plus the Conditional rule, if any. */
 	bool CanPawnEnter(FIntPoint Cell, const APawn* Pawn, FText* OutDeniedMessage = nullptr) const;
 
@@ -263,6 +288,12 @@ private:
 	/** Guards against markers re-entering while we are already re-baking. */
 	bool bIsApplyingOverrides = false;
 #endif
+
+	/**
+	 * Cell index to the actor standing on it. Runtime only and never serialized: it is
+	 * rebuilt from scratch every time the level starts, as each block registers itself.
+	 */
+	TMap<int32, TWeakObjectPtr<AActor>> Occupants;
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> SceneRoot;

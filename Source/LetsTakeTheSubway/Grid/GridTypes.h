@@ -22,7 +22,16 @@ enum class EGridCellType : uint8
 	Conditional		UMETA(DisplayName = "Conditional")
 };
 
-/** Why a cell is not walkable. Surfaced in the HUD so a refusal can be explained. */
+/**
+ * Why a cell is not walkable. Surfaced in the HUD so a refusal can be explained.
+ *
+ * Serialized as a uint8 inside FGridCellData, so new values may only be appended --
+ * inserting one would silently reinterpret every already-saved cell.
+ *
+ * Object is the exception to that storage: it describes a runtime occupant (a puzzle
+ * block), which changes as blocks slide, so it is only ever returned from a query and
+ * never written into cell data.
+ */
 UENUM(BlueprintType)
 enum class EGridBlockReason : uint8
 {
@@ -30,7 +39,24 @@ enum class EGridBlockReason : uint8
 	NoFloorHit		UMETA(DisplayName = "No floor"),
 	Slope			UMETA(DisplayName = "Too steep"),
 	Clearance		UMETA(DisplayName = "Not enough headroom"),
-	Marker			UMETA(DisplayName = "Blocked by designer")
+	Marker			UMETA(DisplayName = "Blocked by designer"),
+	Object			UMETA(DisplayName = "Blocked by object")
+};
+
+/**
+ * A 4-way direction as an editable property.
+ *
+ * EGridDir below is the bitmask form packed into FGridCellData::NeighborMask; it is a plain
+ * namespaced enum and so cannot be a UPROPERTY. This is the authoring counterpart, used for
+ * things a designer picks in the details panel (an elevator's door face, for instance).
+ */
+UENUM(BlueprintType)
+enum class EGridDirection : uint8
+{
+	North	UMETA(DisplayName = "North (+Y)"),
+	East	UMETA(DisplayName = "East (+X)"),
+	South	UMETA(DisplayName = "South (-Y)"),
+	West	UMETA(DisplayName = "West (-X)")
 };
 
 /** Neighbour bits stored in FGridCellData::NeighborMask. Grid is 4-directional. */
@@ -43,6 +69,60 @@ namespace EGridDir
 		South	= 1 << 2,	// -Y
 		West	= 1 << 3	// -X
 	};
+}
+
+namespace LTTSGrid
+{
+	/** The neighbour bit matching an authored direction. */
+	inline uint8 ToDirBit(EGridDirection Dir)
+	{
+		switch (Dir)
+		{
+		case EGridDirection::North:	return EGridDir::North;
+		case EGridDirection::East:	return EGridDir::East;
+		case EGridDirection::South:	return EGridDir::South;
+		default:					return EGridDir::West;
+		}
+	}
+
+	/** Cell offset of one step in a direction. */
+	inline FIntPoint DirOffset(EGridDirection Dir)
+	{
+		switch (Dir)
+		{
+		case EGridDirection::North:	return FIntPoint(0, 1);
+		case EGridDirection::East:	return FIntPoint(1, 0);
+		case EGridDirection::South:	return FIntPoint(0, -1);
+		default:					return FIntPoint(-1, 0);
+		}
+	}
+
+	/**
+	 * Turn a direction by quarter turns.
+	 *
+	 * One positive turn is +90 degrees of yaw, which sends East to North (in a top-down
+	 * view with +X up and +Y right, that reads as clockwise). In the enum order
+	 * North, East, South, West that is a step *back* by one index.
+	 */
+	inline EGridDirection RotateDirection(EGridDirection Dir, int32 QuarterTurns)
+	{
+		const int32 Index = static_cast<int32>(Dir);
+		const int32 Turned = ((Index - QuarterTurns) % 4 + 4) % 4;
+		return static_cast<EGridDirection>(Turned);
+	}
+
+	/**
+	 * Actors carrying this tag are skipped by grid generation traces.
+	 *
+	 * Puzzle blocks stand on the floor and would otherwise bake themselves in as Blocked
+	 * cells, freezing the level layout at whatever positions they happened to be authored
+	 * at. A function-local static keeps FName construction out of static init.
+	 */
+	inline const FName& GenerationIgnoreTag()
+	{
+		static const FName Tag(TEXT("GridTraceIgnore"));
+		return Tag;
+	}
 }
 
 /**
