@@ -414,6 +414,8 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	// Run before the drag and the hover so both see the heights the player is looking at.
 	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
 	{
@@ -425,6 +427,7 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 
 		Subsystem->UpdateOcclusion(CameraLocation, GridPawn, SweepRadius);
 	}
+#endif
 
 	if (DraggedBlock.IsValid())
 	{

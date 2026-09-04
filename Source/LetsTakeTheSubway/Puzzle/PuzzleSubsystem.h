@@ -59,6 +59,8 @@ public:
 	/** Every live block as a plain actor, for a trace that needs to see past all of them. */
 	void GetBlockActors(TArray<AActor*>& OutActors) const;
 
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	/**
 	 * Work out which blocks stand between the camera and the pawn, and flatten them.
 	 *
@@ -69,6 +71,7 @@ public:
 	void UpdateOcclusion(const FVector& CameraLocation, const APawn* Pawn, float SweepRadius);
 
 	int32 GetNumOccludingBlocks() const { return NumOccludingBlocks; }
+#endif
 
 	/** The cell the pawn stands on plus the one it is walking into, if any. */
 	void GetPawnReservedCells(TArray<FIntPoint>& OutCells) const;
@@ -89,5 +92,8 @@ private:
 	TArray<TWeakObjectPtr<APuzzleBlock>> Blocks;
 	TArray<TWeakObjectPtr<APuzzleRotationTile>> Tiles;
 
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	int32 NumOccludingBlocks = 0;
+#endif
 };

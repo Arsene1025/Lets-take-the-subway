@@ -86,10 +86,13 @@ void AGridHUD::DrawHUD()
 		FString Status = FString::Printf(TEXT("Blocks %d   occupied cells %d"),
 			Puzzle->GetNumBlocks(), Grid ? Grid->GetNumOccupiedCells() : 0);
 
+		// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 		if (const int32 Hidden = Puzzle->GetNumOccludingBlocks())
 		{
 			Status += FString::Printf(TEXT("   hidden by %d"), Hidden);
 		}
+#endif
 
 		if (Puzzle->IsInputLocked())
 		{

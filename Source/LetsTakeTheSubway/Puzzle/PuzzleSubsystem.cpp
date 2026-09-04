@@ -105,6 +105,8 @@ void UPuzzleSubsystem::GetBlockActors(TArray<AActor*>& OutActors) const
 	}
 }
 
+// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 void UPuzzleSubsystem::UpdateOcclusion(const FVector& CameraLocation, const APawn* Pawn, float SweepRadius)
 {
 	UWorld* World = GetWorld();
@@ -158,6 +160,7 @@ void UPuzzleSubsystem::UpdateOcclusion(const FVector& CameraLocation, const APaw
 		}
 	}
 }
+#endif
 
 AGridPawn* UPuzzleSubsystem::GetGridPawn() const
 {

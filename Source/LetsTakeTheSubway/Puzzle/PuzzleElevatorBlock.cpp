@@ -68,7 +68,8 @@ void APuzzleElevatorBlock::RefreshVisual()
 
 	// Measured against the height the body is currently drawn at, so the door goes down with
 	// the block when it flattens instead of floating above the slab.
-	const double VisualHeight = GetVisualHeight();
+	// --- CUTAWAY DISABLED 2026-09-04: was GetVisualHeight() ---
+	const double VisualHeight = Height;
 
 	// Pushed a half thickness further out so the slab stands proud of the body rather than
 	// half sunk into it, where it would read as a seam.

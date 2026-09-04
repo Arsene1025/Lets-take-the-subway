@@ -68,6 +68,8 @@ EPuzzleMoveAxis APuzzleBlock::GetWorldMoveAxis() const
 	return LTTSPuzzle::RotateAxis(MoveAxis, QuarterTurns);
 }
 
+// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 FBox APuzzleBlock::GetFullBounds() const
 {
 	if (!Grid)
@@ -90,6 +92,7 @@ FBox APuzzleBlock::GetFullBounds() const
 
 	return FBox(Min, Max);
 }
+#endif
 
 // ---------------------------------------------------------------------------- Placement
 
@@ -103,7 +106,9 @@ void APuzzleBlock::RefreshVisual()
 	// The footprint is authored in the local frame and the actor's yaw carries the rotation,
 	// so the mesh is always sized from the unrotated size.
 	const double CellSize = Grid ? Grid->CellSize : 100.0;
-	const double VisualHeight = GetVisualHeight();
+
+	// --- CUTAWAY DISABLED 2026-09-04: was GetVisualHeight() ---
+	const double VisualHeight = Height;
 
 	BodyMesh->SetRelativeLocation(FVector(0.0, 0.0, VisualHeight * 0.5));
 	BodyMesh->SetRelativeScale3D(FVector(
@@ -112,6 +117,8 @@ void APuzzleBlock::RefreshVisual()
 		VisualHeight / 100.0));
 }
 
+// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 void APuzzleBlock::SetCutaway(bool bInCutaway)
 {
 	if (bCutawayTarget == bInCutaway)
@@ -123,6 +130,7 @@ void APuzzleBlock::SetCutaway(bool bInCutaway)
 
 	UE_LOG(LogLTTSGrid, Verbose, TEXT("%s: cutaway %s."), *GetName(), bInCutaway ? TEXT("on") : TEXT("off"));
 }
+#endif
 
 void APuzzleBlock::ClaimCells()
 {
@@ -373,6 +381,8 @@ void APuzzleBlock::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	// Cutaway is independent of sliding and rotating: a block can be shoved aside while it
 	// is flattened, and it should stay flattened for as long as it is in the way.
 	const float TargetAlpha = bCutawayTarget ? 1.0f : 0.0f;
@@ -381,6 +391,7 @@ void APuzzleBlock::Tick(float DeltaSeconds)
 		CutawayAlpha = FMath::FInterpConstantTo(CutawayAlpha, TargetAlpha, DeltaSeconds, 1.0f / FMath::Max(CutawayBlendTime, 0.01f));
 		RefreshVisual();
 	}
+#endif
 
 	switch (AnimState)
 	{

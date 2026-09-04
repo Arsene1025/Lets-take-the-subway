@@ -67,6 +67,13 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 1.0))
 	float SlideSpeed = 600.0f;
 
+	// --- CUTAWAY DISABLED 2026-09-04 -------------------------------------------------
+	// Flattening a block that hides the pawn is switched off for now. The code is kept
+	// rather than deleted so it can be turned back on: search for this marker, restore
+	// every guarded block, and put GetVisualHeight() back into the two RefreshVisual
+	// overrides. See section 9 of Docs/Plans/RushHourPuzzle.md for why the occlusion
+	// test must stay analytic if it is revived.
+#if 0
 	/** Height the block shrinks to while it is hiding the pawn. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Cutaway", meta = (ClampMin = 1.0))
 	float CutawaySlabHeight = 20.0f;
@@ -74,6 +81,7 @@ public:
 	/** Seconds to press the block down, and to let it back up. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Cutaway", meta = (ClampMin = 0.01))
 	float CutawayBlendTime = 0.15f;
+#endif
 
 	// ---------------------------------------------------------------- Queries
 
@@ -87,6 +95,8 @@ public:
 
 	FGridRect GetRect() const { return FGridRect(MinCell, GetWorldFootprint()); }
 
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	/**
 	 * The volume the block would fill at its authored height, whatever it is drawn at now.
 	 *
@@ -95,6 +105,7 @@ public:
 	 * block would stop occluding, stand up, occlude again, and oscillate every frame.
 	 */
 	FBox GetFullBounds() const;
+#endif
 
 	/** Which way this block may be pushed right now, after any rotation. */
 	virtual EPuzzleMoveAxis GetWorldMoveAxis() const;
@@ -104,7 +115,8 @@ public:
 	bool IsHeld() const { return bHeld; }
 
 	// ---------------------------------------------------------------- Cutaway
-
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	/** Ask the block to flatten (or to stand back up). Blended, so repeated calls are cheap. */
 	void SetCutaway(bool bInCutaway);
 
@@ -117,6 +129,7 @@ public:
 	 * face is still up and still grabbable, just lower down.
 	 */
 	float GetVisualHeight() const { return FMath::Lerp(Height, CutawaySlabHeight, CutawayAlpha); }
+#endif
 
 	/** Height of the floor the block stands on. Captured once, at BeginPlay. */
 	double GetFloorZ() const { return FloorZ; }
@@ -190,10 +203,13 @@ private:
 
 	EAnimState AnimState = EAnimState::Idle;
 
+	// --- CUTAWAY DISABLED 2026-09-04 ---
+#if 0
 	bool bCutawayTarget = false;
 
 	/** 0 at full height, 1 fully flattened. */
 	float CutawayAlpha = 0.0f;
+#endif
 
 	double FloorZ = 0.0;
 
