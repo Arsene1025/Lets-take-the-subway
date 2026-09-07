@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Puzzle/PuzzleLever.h"
 
@@ -36,8 +36,8 @@ APuzzleLever::APuzzleLever()
 	HandleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HandleMesh"));
 	HandleMesh->SetupAttachment(WheelPivot);
 
-	// Same collision rule as a puzzle block: seen by the click trace and nothing else, so
-	// the cursor can take hold of the wheel without the lever affecting the pawn or physics.
+	// 퍼즐 블록과 같은 콜리전 규칙: 클릭 트레이스에만 보이고 그 외에는 아무것에도 잡히지
+	// 않는다. 그래서 레버가 폰이나 물리에 영향을 주지 않으면서도 커서로 휠을 잡을 수 있다.
 	for (UStaticMeshComponent* Mesh : { PostMesh.Get(), WheelMesh.Get(), HandleMesh.Get() })
 	{
 		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
@@ -74,7 +74,7 @@ APuzzleLever::APuzzleLever()
 		HandleMesh->SetMaterial(0, WheelMaterialFinder.Object);
 	}
 
-	// The grid traces the floor the lever stands on, not the lever.
+	// 그리드는 레버가 아니라 레버가 서 있는 바닥을 트레이스한다.
 	Tags.Add(LTTSGrid::GenerationIgnoreTag());
 
 #if WITH_EDITORONLY_DATA
@@ -82,7 +82,7 @@ APuzzleLever::APuzzleLever()
 #endif
 }
 
-// ---------------------------------------------------------------------------- Visual
+// ---------------------------------------------------------------------------- 비주얼
 
 void APuzzleLever::RefreshVisual()
 {
@@ -102,7 +102,7 @@ void APuzzleLever::RefreshVisual()
 
 	if (WheelMesh)
 	{
-		// The engine cylinder is 100 cm across and 100 cm tall, centred on its origin.
+		// 엔진 실린더는 지름 100 cm, 높이 100 cm이며 원점이 중심이다.
 		WheelMesh->SetRelativeLocation(FVector::ZeroVector);
 		WheelMesh->SetRelativeScale3D(FVector(
 			WheelDiameter / 100.0, WheelDiameter / 100.0, WheelThickness / 100.0));
@@ -129,7 +129,7 @@ FVector APuzzleLever::GetWheelWorldLocation() const
 	return WheelPivot ? WheelPivot->GetComponentLocation() : GetActorLocation();
 }
 
-// ---------------------------------------------------------------------------- Queries
+// ---------------------------------------------------------------------------- 조회
 
 void APuzzleLever::GetOperatingCells(TArray<FIntPoint>& OutCells) const
 {
@@ -154,7 +154,7 @@ bool APuzzleLever::IsPawnAdjacent(const AGridPawn* Pawn) const
 	return Cells.Contains(Pawn->GetCurrentCell());
 }
 
-// ---------------------------------------------------------------------------- Use
+// ---------------------------------------------------------------------------- 사용
 
 bool APuzzleLever::TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReason)
 {
@@ -179,7 +179,7 @@ bool APuzzleLever::TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReas
 	return Target->TryRotate(TurnSign, OutReason);
 }
 
-// ---------------------------------------------------------------------------- Lifecycle
+// ---------------------------------------------------------------------------- 생명주기
 
 void APuzzleLever::OnConstruction(const FTransform& Transform)
 {
@@ -206,8 +206,8 @@ void APuzzleLever::BeginPlay()
 		return;
 	}
 
-	// The lever is something the player walks up to, so it takes its cell like any other
-	// obstruction rather than being walked through.
+	// 레버는 플레이어가 걸어가서 다가가는 대상이므로, 통과해 지나가는 대신 다른 장애물처럼
+	// 자기 셀을 점유한다.
 	Grid->SetOccupant(Cell, this);
 
 	SetActorLocation(GridFootprint::CentreFromMinCell(
@@ -224,8 +224,8 @@ void APuzzleLever::BeginPlay()
 		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: no target obstacle set; the lever will do nothing."), *GetName());
 	}
 
-	// A lever nobody can reach is a level bug that only shows up when a player walks over to
-	// it, so it is worth saying at start-up.
+	// 아무도 닿을 수 없는 레버는 플레이어가 걸어가 봐야 드러나는 레벨 버그이므로, 시작
+	// 시점에 미리 알려 둘 가치가 있다.
 	TArray<FIntPoint> Operating;
 	GetOperatingCells(Operating);
 
@@ -264,7 +264,7 @@ void APuzzleLever::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-// ---------------------------------------------------------------------------- Editor
+// ---------------------------------------------------------------------------- 에디터
 
 #if WITH_EDITOR
 

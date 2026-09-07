@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>행인 스포너 배치 가이드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --ground: #eef1f1;
+  --surface: #fafbfb;
+  --surface-sunk: #e4e9e9;
+  --ink: #14181b;
+  --ink-soft: #5a6469;
+  --ink-faint: #8a9498;
+  --rule: #d2d9d9;
+  --rule-strong: #b6c0c0;
+  --accent: #0a7ea4;
+  --accent-soft: #d9ebf3;
+  --trace: #3f9fc8;
+  --warn: #a86a08;
+  --warn-soft: #f6ecd8;
+  --stop: #a3392b;
+  --stop-soft: #f6e2de;
+  --ok: #2c7a4b;
+  --shadow: 0 1px 2px rgba(20, 24, 27, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1315;
+    --surface: #171d20;
+    --surface-sunk: #10161a;
+    --ink: #e7ecee;
+    --ink-soft: #97a3a8;
+    --ink-faint: #6d7a80;
+    --rule: #2a3236;
+    --rule-strong: #3c464b;
+    --accent: #62bcda;
+    --accent-soft: #16303b;
+    --trace: #78c8ff;
+    --warn: #dda953;
+    --warn-soft: #322810;
+    --stop: #e08a7a;
+    --stop-soft: #3a1e19;
+    --ok: #6bbd8b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0f1315;
+  --surface: #171d20;
+  --surface-sunk: #10161a;
+  --ink: #e7ecee;
+  --ink-soft: #97a3a8;
+  --ink-faint: #6d7a80;
+  --rule: #2a3236;
+  --rule-strong: #3c464b;
+  --accent: #62bcda;
+  --accent-soft: #16303b;
+  --trace: #78c8ff;
+  --warn: #dda953;
+  --warn-soft: #322810;
+  --stop: #e08a7a;
+  --stop-soft: #3a1e19;
+  --ok: #6bbd8b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.72;
+  letter-spacing: -0.003em;
+}
+code, .mono, .cell {
+  font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.page { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+.measure { max-width: 68ch; }
+
+.masthead { border-bottom: 2px solid var(--ink); padding: 56px 0 20px; margin-bottom: 40px; }
+.eyebrow {
+  font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent); margin: 0 0 14px;
+}
+h1 {
+  font-size: clamp(30px, 5vw, 44px); font-weight: 700; line-height: 1.16;
+  letter-spacing: -0.02em; margin: 0 0 16px; text-wrap: balance;
+}
+.standfirst { font-size: 18px; color: var(--ink-soft); margin: 0; max-width: 60ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 24px; font-size: 13px; color: var(--ink-faint); }
+.meta b { color: var(--ink-soft); font-weight: 600; }
+
+section { margin-bottom: 56px; }
+h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 4px; text-wrap: balance; }
+.sec-num {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent);
+  letter-spacing: .1em; display: block; margin-bottom: 6px;
+}
+h2 + .lede { color: var(--ink-soft); margin: 0 0 24px; }
+h3 { font-size: 15px; font-weight: 600; margin: 32px 0 8px; letter-spacing: -0.01em; }
+p { margin: 0 0 16px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+.cell {
+  background: var(--surface-sunk); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 0 5px; font-size: .88em; white-space: nowrap;
+}
+code:not(.cell) { font-size: .89em; }
+
+/* 절차 */
+.procedure { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+.procedure > li {
+  counter-increment: step;
+  display: grid; grid-template-columns: 40px 1fr; gap: 18px;
+  padding: 22px 0; border-top: 1px solid var(--rule);
+}
+.procedure > li:last-child { border-bottom: 1px solid var(--rule); }
+.procedure > li::before {
+  content: counter(step);
+  font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600;
+  color: var(--surface); background: var(--accent);
+  width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; margin-top: 2px;
+}
+.procedure h3 { margin: 0 0 6px; font-size: 17px; }
+.procedure p { margin: 0 0 12px; color: var(--ink-soft); font-size: 15px; }
+.procedure p:last-child { margin-bottom: 0; }
+
+/* 표 */
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); margin-bottom: 16px; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14.5px; }
+th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+thead th {
+  font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 600; background: var(--surface-sunk);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.k { white-space: nowrap; }
+td.d { white-space: nowrap; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; color: var(--accent); font-size: 13px; }
+
+/* 코드 */
+pre.cmd {
+  background: var(--surface-sunk); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+  border-radius: 4px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 13px; line-height: 1.8; color: var(--ink);
+}
+pre.cmd .c { color: var(--ink-faint); }
+
+.callout {
+  border: 1px solid var(--rule); border-left: 3px solid var(--warn);
+  background: var(--warn-soft); border-radius: 4px; padding: 14px 18px; margin: 0 0 20px;
+  font-size: 15px;
+}
+.callout b { color: var(--warn); }
+.callout p:last-child { margin-bottom: 0; }
+.callout.stop { border-left-color: var(--stop); background: var(--stop-soft); }
+.callout.stop b { color: var(--stop); }
+
+.checklist { list-style: none; margin: 0; padding: 0; }
+.checklist li {
+  display: grid; grid-template-columns: 22px 1fr; gap: 12px; align-items: start;
+  padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 15px;
+}
+.checklist li:last-child { border-bottom: none; }
+.checklist li::before {
+  content: ""; width: 15px; height: 15px; margin-top: 6px;
+  border: 1.5px solid var(--rule-strong); border-radius: 3px; background: var(--surface);
+}
+.checklist .grp {
+  font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+  font-weight: 600; display: block; margin: 24px 0 4px; border: none; padding: 0;
+  grid-template-columns: 1fr;
+}
+.checklist .grp::before { display: none; }
+
+.note { border-left: 2px solid var(--rule-strong); padding: 2px 0 2px 16px; color: var(--ink-soft); font-size: 15px; margin: 0 0 16px; }
+
+footer { border-top: 1px solid var(--rule); padding-top: 20px; font-size: 13px; color: var(--ink-faint); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="masthead">
+  <p class="eyebrow">Lets Take the Subway · 기획 · 레벨 문서</p>
+  <h1>행인 스포너 배치 가이드</h1>
+  <p class="standfirst">레벨에 스포너를 놓고 경유 셀만 적으면 행인이 다닌다. 배치 순서, 프로퍼티, 셀 좌표를 구하는 법, 그리고 안 될 때 무엇을 보는지.</p>
+  <div class="meta">
+    <span><b>대상</b> AGridNPCSpawner</span>
+    <span><b>작성</b> 2026-09-07</span>
+    <span><b>동작 원리</b> Docs/GridNPC_Flow.html</span>
+  </div>
+</header>
+
+<section>
+  <span class="sec-num">00</span>
+  <h2>먼저 확인할 것</h2>
+  <div class="callout stop">
+    <p><b>새 클래스가 에디터에 로드돼 있어야 한다.</b> 코드가 추가된 뒤로 에디터를 한 번도 다시 켜지 않았다면 배치 패널에 <code>Grid NPC Spawner</code>가 보이지 않는다. 에디터를 닫고 아래를 실행한 뒤 다시 켠다.</p>
+  </div>
+  <pre class="cmd"><span class="c"># 에디터를 완전히 닫은 상태에서</span>
+"C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" ^
+  LetsTakeTheSubwayEditor Win64 Development ^
+  -project="C:\Users\User\Desktop\Lets-take-the-subway\LetsTakeTheSubway.uproject" -waitmutex</pre>
+  <p class="note">레벨에 <code>AGridActor</code>가 하나 있어야 하고, 경유 셀로 쓸 자리는 이미 <b>Generate Grid</b>가 돌아 있어야 한다. 스포너와 행인은 <span class="cell">GridTraceIgnore</span> 태그를 달고 있어서 나중에 다시 구워도 셀을 오염시키지 않는다.</p>
+</section>
+
+<section>
+  <span class="sec-num">01</span>
+  <h2>세 단계로 놓는다</h2>
+  <ol class="procedure">
+    <li>
+      <div>
+        <h3>스포너를 배치한다</h3>
+        <p>Place Actors 패널에서 <b>Grid NPC Spawner</b>를 끌어다 놓는다. 행인이 나올 자리, 보통 계단 입구나 승강장 끝이다.</p>
+        <p><b>그리드 밖이어도 된다.</b> 셀에 스냅하지 않고, 행인이 스스로 가장 가까운 셀로 걸어 들어온다. 다만 스포너와 그리드 사이는 직선으로 걷기 때문에 그 사이에 벽이 없어야 한다.</p>
+        <p>에디터에 보이는 원뿔은 위치 표식일 뿐이고 게임에서는 보이지 않는다.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <h3>경유 셀을 적는다</h3>
+        <p>디테일 패널의 <code>Waypoints</code>에 셀 좌표를 순서대로 넣는다. <b>마지막 셀이 목적지</b>이고, 행인은 거기 닿으면 사라진다. 셀 사이는 A*가 알아서 잇는다.</p>
+        <p>모퉁이를 돌게 하고 싶으면 모퉁이 셀을 하나 넣으면 된다. 직선 구간을 잘게 쪼갤 필요는 없다. 좌표를 구하는 법은 3절.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <h3>간격과 수를 정하고 저장한다</h3>
+        <p><code>Spawn Interval</code>과 <code>Max Alive</code>를 맞춘다. 기본값 4초 · 3명이면 승강장 하나가 적당히 붐빈다.</p>
+        <p>월드 파티션 레벨이라 스포너는 새 외부 액터로 저장된다. 툴바의 <b>Save Current Level</b>을 눌러야 파일이 만들어진다. 액터만 저장하는 방법으로는 저장되지 않는다.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <span class="sec-num">02</span>
+  <h2>프로퍼티</h2>
+  <h3>NPC Spawner</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>이름</th><th>기본</th><th>설명</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><code>NPC Class</code></td><td class="d">AGridNPC</td><td>내보낼 행인 클래스. 블루프린트 자식을 만들어 종류를 늘릴 수 있다.</td></tr>
+        <tr><td class="k"><code>Waypoints</code></td><td class="d">비어 있음</td><td>지나갈 셀들. 마지막이 목적지. <b>비어 있으면 스포너가 꺼진다.</b></td></tr>
+        <tr><td class="k"><code>Spawn Interval</code></td><td class="d">4.0 s</td><td>다음 행인이 나오기까지의 간격.</td></tr>
+        <tr><td class="k"><code>First Spawn Delay</code></td><td class="d">1.0 s</td><td>게임 시작 후 첫 행인까지. 여러 스포너를 서로 어긋나게 할 때 쓴다.</td></tr>
+        <tr><td class="k"><code>Max Alive</code></td><td class="d">3</td><td>이 스포너의 행인 중 동시에 살아 있을 수 있는 수. 도착해 사라지면 슬롯이 빈다.</td></tr>
+        <tr><td class="k"><code>Enabled</code></td><td class="d">true</td><td>끄면 아무도 나오지 않는다. 경유 셀이 잘못돼도 자동으로 꺼진다.</td></tr>
+        <tr><td class="k"><code>Entry Search Radius</code></td><td class="d">8 셀</td><td>스포너가 그리드 밖일 때 진입 셀을 찾을 반경. 넓힐수록 벽을 통과해 들어올 여지도 커진다.</td></tr>
+        <tr><td class="k"><code>NPC Move Speed</code></td><td class="d">300 cm/s</td><td>플레이어(400)보다 느리게 두면 행인답게 보인다.</td></tr>
+        <tr><td class="k"><code>NPC Tags</code></td><td class="d">비어 있음</td><td>태어나는 행인에게 붙일 태그. 개찰구를 지나야 하면 <span class="cell">HasTicket</span>을 넣는다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Grid NPC — 스포너가 만든 행인을 조정할 때</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>이름</th><th>기본</th><th>설명</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><code>Move Speed</code></td><td class="d">300 cm/s</td><td>스포너의 값으로 덮어써진다. 직접 놓은 행인에게만 유효하다.</td></tr>
+        <tr><td class="k"><code>Height Above Floor</code></td><td class="d">0 cm</td><td>셀 바닥에서 액터 원점까지. 0이면 발이 바닥에 닿는다.</td></tr>
+        <tr><td class="k"><code>Pass Through Occupants</code></td><td class="d">true</td><td>끄면 플레이어와 퍼즐 블록에 막힌다. 막히면 그 자리에서 기다렸다 우회로를 찾는다.</td></tr>
+        <tr><td class="k"><code>Blocked Retry Seconds</code></td><td class="d">0.5 s</td><td>막혔을 때 경로를 다시 계산하는 주기.</td></tr>
+        <tr><td class="k"><code>Ghost Material</code></td><td class="d">엔진 반투명</td><td>플레이어와 겹치는 동안 입는 머티리얼. 전용 툰 반투명이 생기면 여기에 끼운다.</td></tr>
+        <tr><td class="k"><code>Ghost Color</code></td><td class="d">연한 하늘색 α 0.35</td><td>알파가 곧 불투명도다.</td></tr>
+        <tr><td class="k"><code>Body Height</code> · <code>Body Diameter</code></td><td class="d">120 · 60 cm</td><td>그레이박스 몸통 치수. 지름은 셀 하나(100 cm)보다 작게 둔다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">행인을 <b>스포너 없이 직접</b> 레벨에 놓아도 된다. 그 경우 행인 자신의 <code>Waypoints</code>를 적으면 한 명이 한 번만 걷고 사라진다. 경로 시험용으로 편하다.</p>
+</section>
+
+<section>
+  <span class="sec-num">03</span>
+  <h2>셀 좌표 구하는 법</h2>
+  <p class="lede">경유 셀은 월드 좌표가 아니라 그리드 셀 번호다. 두 가지 방법이 있다.</p>
+  <h3>방법 1 — 그리드 액터에게 물어본다</h3>
+  <p class="measure">그리드 액터를 선택하고 <code>Grid | Debug</code>의 <code>Debug Inspect Cell</code>에 셀 번호를 넣으면, 값을 바꾸는 즉시 출력 로그에 그 셀의 상태가 찍힌다. <code>Debug Path Start</code>와 <code>Debug Path Goal</code>을 채우면 두 셀 사이에 길이 있는지도 같이 나온다. 경유 셀을 확정하기 전에 이걸로 확인하는 편이 빠르다.</p>
+  <pre class="cmd">cell (70,62): type=Walkable reason=None floorZ=-600.0 neighbours=NES- world=(50,3850,-600)
+path (70,62) -&gt; (93,44): 41 step(s) in 0.02 ms.</pre>
+  <p class="measure"><span class="cell">neighbours=NES-</span>에서 서쪽이 비어 있다는 것은 그쪽이 절벽이거나 막혔다는 뜻이다. 위 예에서 서쪽 <span class="cell">(69,62)</span>가 바로 승강장 가장자리 틈이다.</p>
+
+  <h3>방법 2 — 월드 좌표에서 계산한다</h3>
+  <p class="measure">뷰포트에서 원하는 지점의 월드 좌표를 읽고 아래로 바꾼다. 셀 크기는 항상 100 cm다.</p>
+  <pre class="cmd">셀 → 월드 중심   world = 그리드원점 + (셀 + 0.5) × 100
+월드 → 셀        셀 = floor((world − 그리드원점) ÷ 100)
+
+<span class="c">GreyBoxTest_1 기준 그리드 원점 = (-7000, -2400, -700)</span>
+<span class="c">예: 셀 (93,44) → X = -7000 + 93.5×100 = 2350,  Y = -2400 + 44.5×100 = 2050</span></pre>
+  <p class="note">Z는 계산하지 않아도 된다. 행인은 각 셀의 바닥 높이를 따라가므로 계단과 경사로가 저절로 처리된다.</p>
+</section>
+
+<section>
+  <span class="sec-num">04</span>
+  <h2>플레이 중에 확인하기</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>명령</th><th>하는 일</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><code>ltts.GridDebug 1</code></td><td>화면 좌상단에 그리드 정보와 <b>NPCs alive</b> 줄을 띄운다.</td></tr>
+        <tr><td class="k"><code>ltts.GridDebug 2</code></td><td>여기에 더해 행인마다 남은 경로를 하늘색 선으로 그린다. 플레이어 경로 선과 겹치지 않는다.</td></tr>
+        <tr><td class="k"><code>ltts.SpawnNPC</code></td><td>모든 스포너에서 지금 하나씩 내보낸다. <b>간격과 동시 수 상한을 무시한다.</b></td></tr>
+        <tr><td class="k"><code>ltts.SpawnNPC Spawner_1</code></td><td>이름에 그 문자열이 든 스포너에서만 내보낸다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="measure">경로를 눈으로 확인할 때는 <code>ltts.GridDebug 2</code>를 켜고 <code>ltts.SpawnNPC</code>를 몇 번 두드리는 편이, 간격 설정을 바꿔 PIE를 다시 켜는 것보다 빠르다.</p>
+</section>
+
+<section>
+  <span class="sec-num">05</span>
+  <h2>안 될 때</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>증상</th><th>원인</th><th>조치</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="k">배치 패널에 스포너가 없다</td>
+          <td>에디터에 새 클래스가 로드되지 않았다.</td>
+          <td>0절대로 에디터를 닫고 Development 에디터 타깃을 빌드한 뒤 다시 켠다.</td>
+        </tr>
+        <tr>
+          <td class="k">아무도 안 나온다</td>
+          <td>경유 셀이 비었거나 잘못됐다. 또는 <code>Enabled</code>가 꺼졌다.</td>
+          <td>출력 로그에서 <code>waypoint N is not a walkable cell</code>을 찾는다. 그 번호의 셀을 고친다.</td>
+        </tr>
+        <tr>
+          <td class="k">한 명 나오고 끝난다</td>
+          <td>경유 셀 사이가 끊겨 스포너가 스스로 멈췄다.</td>
+          <td><code>disabling this spawner</code> 로그의 두 셀 사이를 본다. <code>Debug Path Start/Goal</code>로 재현된다.</td>
+        </tr>
+        <tr>
+          <td class="k">태어나자마자 사라진다</td>
+          <td>스포너 주변 <code>Entry Search Radius</code> 안에 들어갈 셀이 없다.</td>
+          <td>스포너를 그리드 쪽으로 옮기거나 반경을 키운다.</td>
+        </tr>
+        <tr>
+          <td class="k">엉뚱한 쪽에서 그리드로 올라온다</td>
+          <td>스포너 반대편에 더 가까운 셀이 있다.</td>
+          <td>스포너를 원하는 진입 지점 바로 옆으로 옮긴다. 진입은 길찾기가 아니라 최근접 선택이다.</td>
+        </tr>
+        <tr>
+          <td class="k">행인이 벽을 통과해 들어온다</td>
+          <td>스포너와 진입 셀 사이를 직선으로 걷는다.</td>
+          <td>스포너를 그리드 가장자리에 붙인다. 이 구간만은 길찾기를 쓰지 않는다.</td>
+        </tr>
+        <tr>
+          <td class="k">행인이 바닥에 묻히거나 뜬다</td>
+          <td><code>Height Above Floor</code>가 0이 아니다.</td>
+          <td>0으로 되돌린다. 키를 바꾸려면 <code>Body Height</code>를 쓴다.</td>
+        </tr>
+        <tr>
+          <td class="k">행인 위를 클릭하면 안 움직인다</td>
+          <td>이런 일은 없어야 한다. 행인은 콜리전이 전혀 없다.</td>
+          <td>블루프린트 자식에서 콜리전을 켜지 않았는지 본다.</td>
+        </tr>
+        <tr>
+          <td class="k">겹쳐도 반투명해지지 않는다</td>
+          <td><code>Ghost Material</code>이 비었다.</td>
+          <td><code>no ghost material</code> 경고를 확인하고 머티리얼을 넣는다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <span class="sec-num">06</span>
+  <h2>프로토타입 배치값</h2>
+  <p class="lede">B2 동쪽 승강장. 2026-09-07에 에디터에서 실측했다. 그대로 넣으면 진입 스텝까지 한 번에 확인된다.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>항목</th><th>값</th></tr></thead>
+      <tbody>
+        <tr><td class="k">스포너 위치</td><td class="d">(-50, 3850, -600)</td></tr>
+        <tr><td class="k">그 자리의 셀</td><td class="d">(69, 62) — NoFloor</td></tr>
+        <tr><td class="k">Waypoints</td><td class="d">(72,62) (88,62) (93,58) (93,44)</td></tr>
+        <tr><td class="k">Spawn Interval · Max Alive</td><td class="d">4.0 · 3</td></tr>
+        <tr><td class="k">예상 진입 셀</td><td class="d">(70, 62)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <p><b>승강장 실제 범위는 x 70~94, y 42~63이다.</b> 계획 단계에서 적었던 x 96까지는 바닥이 없다. x 69는 가장자리 틈이라 걸을 수 없고, x 68 이하는 5 m 위 윗층 바닥이라 이어지지 않는다.</p>
+  </div>
+</section>
+
+<section>
+  <span class="sec-num">07</span>
+  <h2>배치 뒤 확인할 것</h2>
+  <ul class="checklist">
+    <li class="grp">로그로 확인</li>
+    <li>스포너 <code>BeginPlay</code>에 경고 없이 <code>N waypoints valid, timer started</code>가 뜬다.</li>
+    <li>첫 행인이 <code>entering the grid at cell (70,62)</code>를 찍는다.</li>
+    <li>HUD의 <b>NPCs alive</b>가 <code>Max Alive</code>를 넘지 않고, 간격에 맞춰 늘고 준다.</li>
+    <li><code>Stage clear … reached by GridNPC</code> 같은 줄이 <b>없다</b>.</li>
+    <li>스포너를 둔 채 <b>Generate Grid</b>를 다시 눌러도 셀 통계가 그대로다.</li>
+    <li>PIE를 껐다 켜기를 두 번 반복해도 오류가 없다.</li>
+    <li class="grp">눈으로 확인</li>
+    <li>행인이 스포너에서 그리드로 <b>걸어</b> 들어온다. 순간이동하지 않는다.</li>
+    <li>진행 방향으로 몸을 돌린다. 코가 가는 쪽을 향한다.</li>
+    <li>플레이어를 행인 경로에 세워 두면 겹치는 동안 반투명해지고 지나가면 되돌아온다.</li>
+    <li>행인 위를 클릭해도 플레이어가 그 뒤 바닥으로 이동한다.</li>
+    <li>경유 셀을 퍼즐 블록 위로 잡아도 행인이 통과하고, 블록은 여전히 밀린다.</li>
+    <li>목적지에 닿으면 사라지고 다음 행인이 나온다.</li>
+  </ul>
+</section>
+
+<footer>
+  Lets Take the Subway · Tailcomet Games · 동작 원리는 <code>Docs/GridNPC_Flow.html</code>, 설계 배경과 구현 결과는 <code>Docs/Plans/GridNPC.md</code>.
+</footer>
+
+</div>
+</body>
+</html>

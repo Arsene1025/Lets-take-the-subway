@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -12,15 +12,15 @@ class APuzzleBlock;
 class UStaticMeshComponent;
 
 /**
- * A square patch of floor that turns whatever is standing on it a quarter turn.
+ * 위에 서 있는 것을 90도 돌리는 정사각형 바닥 패치.
  *
- * The design calls this "rotating the space", and that is literally what happens: every
- * block sitting entirely within the region is carried around the region's centre together,
- * so their relative arrangement is preserved and no two of them can collide. The elevator's
- * value here is that its door comes out facing a new direction.
+ * 디자인에서는 이것을 "공간을 회전시킨다"라고 부르는데, 말 그대로 그렇게 동작한다: 영역 안에
+ * 완전히 들어 있는 모든 블록이 영역 중심을 축으로 함께 실려 돌므로 서로의 상대 배치가
+ * 유지되고 어떤 둘도 충돌할 수 없다. 여기서 엘리베이터의 가치는 문이 새로운 방향을 향하게
+ * 된다는 점이다.
  *
- * A block that only half overlaps the region has no sensible destination, so the rotation is
- * refused outright and the player is told why rather than having a piece shoved aside.
+ * 영역에 반만 걸친 블록은 말이 되는 목적지가 없으므로, 피스를 옆으로 밀어내는 대신 회전을
+ * 아예 거부하고 플레이어에게 이유를 알려준다.
  */
 UCLASS(HideCategories = (Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, Replication))
 class LETSTAKETHESUBWAY_API APuzzleRotationTile : public AActor
@@ -30,11 +30,11 @@ class LETSTAKETHESUBWAY_API APuzzleRotationTile : public AActor
 public:
 	APuzzleRotationTile();
 
-	/** Side length in cells. Square, because a rectangle could not hold its own contents after a turn. */
+	/** 한 변의 길이(셀 단위). 직사각형은 한 번 돌고 나면 자기 내용물을 담을 수 없으므로 정사각형이다. */
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile", meta = (ClampMin = 2, ClampMax = 16))
 	int32 SizeInCells = 4;
 
-	/** Turn direction seen from above. Clockwise matches the design document's diagram. */
+	/** 위에서 본 회전 방향. 시계 방향이 디자인 문서의 도해와 일치한다. */
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile")
 	bool bClockwise = true;
 
@@ -45,18 +45,17 @@ public:
 
 	bool IsRotating() const { return bRotating; }
 
-	/** True when every cell of the block lies inside the region. */
+	/** 블록의 모든 셀이 영역 안에 들어 있으면(완전히 포함하면) true. */
 	bool FullyContains(const APuzzleBlock& Block) const;
 
-	/** True when the block covers some of the region but hangs over its edge. */
+	/** 블록이 영역 일부를 덮지만 가장자리 밖으로 삐져나와 있으면(걸침) true. */
 	bool Straddles(const APuzzleBlock& Block) const;
 
 	/**
-	 * Turn the space, or explain why it cannot be turned.
+	 * 공간을 돌리거나, 왜 돌릴 수 없는지 이유를 알려준다.
 	 *
-	 * Refuses when a block straddles the border, when a rotated block would land on
-	 * something that is not walkable floor, or when the pawn standing inside would be moved
-	 * somewhere it cannot stand.
+	 * 블록이 경계에 걸쳐 있을 때, 회전한 블록이 걸을 수 있는 바닥이 아닌 곳에 놓이게 될 때,
+	 * 안에 서 있는 폰이 설 수 없는 곳으로 옮겨지게 될 때 거부한다.
 	 */
 	bool TryRotate(FText* OutReason = nullptr);
 
@@ -76,11 +75,11 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
 	TObjectPtr<USceneComponent> SceneRoot;
 
-	/** Flat pad marking the region. Carries no collision so click and floor traces pass through it. */
+	/** 영역을 표시하는 평평한 패드. 클릭 트레이스와 바닥 트레이스가 통과하도록 콜리전이 없다. */
 	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
 	TObjectPtr<UStaticMeshComponent> PadMesh;
 
-	/** Sits on one corner so the turn direction is readable at a glance in the level. */
+	/** 한쪽 모서리에 놓여, 레벨에서 회전 방향이 한눈에 읽히게 한다. */
 	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
 	TObjectPtr<UStaticMeshComponent> CornerMesh;
 
@@ -95,6 +94,6 @@ private:
 	bool bDisabled = false;
 	float RotationElapsed = 0.0f;
 
-	/** Where the pawn ends up, applied once the spin finishes so it travels with the space. */
+	/** 폰이 최종적으로 놓일 셀. 회전이 끝난 뒤 적용해 폰이 공간과 함께 이동하게 한다. */
 	TOptional<FIntPoint> PendingPawnCell;
 };

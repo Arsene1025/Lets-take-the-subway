@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -11,15 +11,15 @@ class AGridPawn;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnElevatorBoarded, APuzzleElevatorBlock*, Elevator, APawn*, Pawn);
 
 /**
- * The goal piece: a 4x4 elevator with a door on one face.
+ * 목표 조각: 한 면에 문이 달린 4x4 엘리베이터.
  *
- * Unlike a plain block it can only travel along the axis its door faces, which is what makes
- * the puzzle a puzzle -- reaching the player is not a matter of sliding it anywhere, but of
- * getting it onto a rotation tile so the door comes out pointing somewhere reachable.
+ * 일반 블록과 달리 문이 향한 축으로만 이동할 수 있으며, 이것이 퍼즐을 퍼즐답게 만든다 --
+ * 플레이어에게 닿는 일은 아무 데나 밀어 오는 게 아니라, 회전 타일 위에 올려서 문이
+ * 닿을 수 있는 쪽을 향하게 만드는 일이다.
  *
- * Boarding is deliberately only an announcement for now. Moving the pawn between floors
- * needs the layered grids and link cells sketched in the greybox plan; when that exists it
- * subscribes to OnBoarded and nothing here has to change.
+ * 탑승은 당분간 일부러 알림에 그친다. 폰을 층 사이로 옮기려면 그레이박스 계획에 스케치된
+ * 층별 그리드와 링크 셀이 필요하다. 그것이 생기면 OnBoarded를 구독하면 되고, 여기서는
+ * 아무것도 바꿀 필요가 없다.
  */
 UCLASS(HideCategories = (Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, Replication))
 class LETSTAKETHESUBWAY_API APuzzleElevatorBlock : public APuzzleBlock
@@ -29,27 +29,27 @@ class LETSTAKETHESUBWAY_API APuzzleElevatorBlock : public APuzzleBlock
 public:
 	APuzzleElevatorBlock();
 
-	/** Which face the door is on, in the block's own frame. Rotation turns it with the block. */
+	/** 블록 자신의 프레임 기준으로 문이 있는 면. 회전하면 블록과 함께 돈다. */
 	UPROPERTY(EditAnywhere, Category = "Elevator")
 	EGridDirection DoorDirection = EGridDirection::North;
 
-	/** Fired when the pawn steps in. Floor travel hangs off this. */
+	/** 폰이 들어서면 발생한다. 층 이동은 여기에 매달린다. */
 	UPROPERTY(BlueprintAssignable, Category = "Elevator")
 	FOnElevatorBoarded OnBoarded;
 
-	/** The door's facing as it lies on the grid right now. */
+	/** 지금 그리드에 놓인 상태에서 문이 향한 방향. */
 	EGridDirection GetWorldDoorDirection() const;
 
-	/** The block only travels along the door's axis, whatever the authored MoveAxis says. */
+	/** 지정된 MoveAxis가 무엇이든 블록은 문의 축으로만 이동한다. */
 	virtual EPuzzleMoveAxis GetWorldMoveAxis() const override;
 
-	/** The row of cells immediately outside the door. These are where the pawn boards from. */
+	/** 문 바로 바깥의 셀 한 줄. 폰은 여기서 탑승한다. */
 	void GetDoorFrontCells(TArray<FIntPoint>& OutCells) const;
 
-	/** True when the pawn is standing on one of the door-front cells. */
+	/** 폰이 문 앞 셀 중 하나에 서 있으면 true. */
 	bool IsPawnAtDoor(const AGridPawn* Pawn) const;
 
-	/** Step the pawn in, or explain why it cannot. */
+	/** 폰을 태우거나, 왜 못 타는지 설명한다. */
 	bool TryBoard(AGridPawn* Pawn, FText* OutReason = nullptr);
 
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -61,7 +61,7 @@ public:
 protected:
 	virtual void RefreshVisual() override;
 
-	/** A slab on the door face, so the opening is readable in the greybox. */
+	/** 그레이박스에서 출입구를 알아볼 수 있도록 문 면에 붙인 슬랩. */
 	UPROPERTY(VisibleAnywhere, Category = "Elevator")
 	TObjectPtr<UStaticMeshComponent> DoorMesh;
 };

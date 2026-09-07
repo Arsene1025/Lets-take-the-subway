@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Puzzle/PuzzleRotatingObstacle.h"
 
@@ -22,7 +22,7 @@ namespace
 	constexpr double LTTSPi = 3.14159265358979323846;
 	constexpr double LTTSTwoPi = 2.0 * LTTSPi;
 
-	/** Slack in cells, so shapes that merely touch are not treated as overlapping. */
+	/** 셀 단위 여유 값. 단순히 맞닿기만 한 도형을 겹친 것으로 취급하지 않기 위한 값이다. */
 	constexpr double LTTSTouchEpsilon = 0.02;
 
 	double WrapToPi(double Angle)
@@ -52,9 +52,9 @@ namespace
 	}
 
 	/**
-	 * A shape reduced to the band of radii and the wedge of angles it occupies about the
-	 * origin. Rotating such a description is adding to StartAngle, and sweeping it through a
-	 * turn is lengthening AngleLength -- which is what makes the swept-area test cheap.
+	 * 도형을 원점 기준으로 차지하는 반지름 띠와 각도 부채꼴로 환원한 것. 이 표현을 회전시키는
+	 * 것은 StartAngle에 더하는 것이고, 한 번의 회전만큼 스윕하는 것은 AngleLength를 늘리는
+	 * 것이다. 회전 경로(스윕 영역) 검사가 싸게 끝나는 이유다.
 	 */
 	struct FPolarSpan
 	{
@@ -66,7 +66,7 @@ namespace
 		bool IsFullCircle() const { return AngleLength >= LTTSTwoPi; }
 	};
 
-	/** Polar extent of the unit cell whose low corner is at (X, Y), measured from the origin. */
+	/** 낮은 쪽 모서리가 (X, Y)에 있는 단위 셀의 극좌표 범위. 원점 기준으로 잰다. */
 	FPolarSpan MakeCellSpan(double X, double Y)
 	{
 		FPolarSpan Span;
@@ -87,8 +87,8 @@ namespace
 		}
 		Span.MaxRadius = FMath::Sqrt(MaxRadiusSq);
 
-		// The origin on or inside the cell means the cell covers every direction, and the
-		// corner-angle arithmetic below would have no contiguous wedge to report.
+		// 원점이 셀 위나 안에 있으면 셀이 모든 방향을 덮는다는 뜻이고, 아래의 모서리 각도
+		// 계산으로는 보고할 연속된 부채꼴이 없다.
 		if (X0 <= 0.0 && 0.0 <= X1 && Y0 <= 0.0 && 0.0 <= Y1)
 		{
 			Span.MinRadius = 0.0;
@@ -101,10 +101,9 @@ namespace
 		const double NearY = FMath::Clamp(0.0, Y0, Y1);
 		Span.MinRadius = FMath::Sqrt(NearX * NearX + NearY * NearY);
 
-		// Measured as offsets from the first corner, so a wedge straddling the -X axis stays
-		// one contiguous interval instead of splitting at the atan2 discontinuity. A cell
-		// that excludes the origin always spans less than half a turn, so the offsets are
-		// unambiguous.
+		// 첫 번째 모서리 기준 오프셋으로 재므로, -X 축에 걸친 부채꼴이 atan2 불연속점에서
+		// 갈라지지 않고 하나의 연속 구간으로 남는다. 원점을 포함하지 않는 셀은 항상 반 바퀴
+		// 미만의 각도만 차지하므로 오프셋에 모호함이 없다.
 		const double BaseAngle = FMath::Atan2(Corners[0][1], Corners[0][0]);
 
 		double MinDelta = 0.0;
@@ -145,8 +144,8 @@ APuzzleRotatingObstacle::APuzzleRotatingObstacle()
 	MoveAxis = EPuzzleMoveAxis::None;
 	Height = 300.0f;
 
-	// The inherited single box would sit across the channel. The body is drawn instead as
-	// the slabs left over once the channel is cut out.
+	// 상속받은 단일 박스는 홈을 가로질러 놓이게 된다. 대신 홈을 잘라내고 남은 슬랩들로
+	// 본체를 그린다.
 	if (BodyMesh)
 	{
 		BodyMesh->SetVisibility(false);
@@ -168,7 +167,7 @@ APuzzleRotatingObstacle::APuzzleRotatingObstacle()
 		UStaticMeshComponent* Slab = CreateDefaultSubobject<UStaticMeshComponent>(SlabNames[Index]);
 		Slab->SetupAttachment(SceneRoot);
 
-		// Same rule as the base block: visible to the click trace and to nothing else.
+		// 기본 블록과 같은 규칙: 클릭 트레이스에만 보이고 그 외에는 아무것에도 잡히지 않는다.
 		Slab->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 		Slab->SetCollisionResponseToAllChannels(ECR_Ignore);
 		Slab->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
@@ -202,15 +201,15 @@ APuzzleRotatingObstacle::APuzzleRotatingObstacle()
 	}
 }
 
-// ---------------------------------------------------------------------------- Authoring
+// ---------------------------------------------------------------------------- 저작
 
 void APuzzleRotatingObstacle::NormaliseAuthoring()
 {
 	FootprintSize.X = FMath::Max(FootprintSize.X, 2);
 	FootprintSize.Y = FMath::Max(FootprintSize.Y, 2);
 
-	// A rectangle whose sides differ in parity has its centre half a cell off the grid, and
-	// everything it carries round would land there too.
+	// 두 변의 홀짝이 다른 사각형은 중심이 그리드에서 반 셀 어긋나 있고, 함께 실려 도는
+	// 것들도 모두 그 어긋난 자리에 놓이게 된다.
 	if ((FootprintSize.X % 2) != (FootprintSize.Y % 2))
 	{
 		UE_LOG(LogLTTSGrid, Warning,
@@ -232,19 +231,19 @@ void APuzzleRotatingObstacle::NormaliseAuthoring()
 			TEXT("%s: the channel covers the whole footprint, leaving no solid body."), *GetName());
 	}
 
-	// Not a piece anyone pushes. Pinned here as well as in the constructor so an old level
-	// that stored something else is corrected on load.
+	// 누군가 미는 피스가 아니다. 다른 값을 저장해 둔 오래된 레벨이 로드될 때 바로잡히도록
+	// 생성자뿐 아니라 여기서도 고정한다.
 	MoveAxis = EPuzzleMoveAxis::None;
 }
 
-// ---------------------------------------------------------------------------- Geometry
+// ---------------------------------------------------------------------------- 기하
 
 FIntPoint APuzzleRotatingObstacle::LocalToWorldOffset(FIntPoint Local) const
 {
 	FIntPoint Point = Local;
 	FIntPoint Size = FootprintSize;
 
-	// One turn of a W x H rectangle sends local (x, y) to (H-1-y, x) and swaps the sides.
+	// W x H 사각형을 한 번 돌리면 로컬 (x, y)는 (H-1-y, x)로 가고 두 변이 맞바뀐다.
 	for (int32 Turn = 0; Turn < GetQuarterTurns(); ++Turn)
 	{
 		Point = FIntPoint(Size.Y - 1 - Point.Y, Point.X);
@@ -259,8 +258,8 @@ FGridRect APuzzleRotatingObstacle::GetWorldChannelRect() const
 	const FIntPoint LowLocal = LocalToWorldOffset(ChannelOffset);
 	const FIntPoint HighLocal = LocalToWorldOffset(ChannelOffset + ChannelSize - FIntPoint(1, 1));
 
-	// Both extreme corners are mapped and recombined: they swap roles on odd turns, so the
-	// component-wise minimum is right for every facing without a special case.
+	// 양 끝 모서리를 모두 변환한 뒤 다시 합친다: 홀수 번 돌면 둘의 역할이 뒤바뀌므로,
+	// 성분별 최솟값을 취하면 특수 처리 없이 어느 방향에서도 맞는다.
 	const FIntPoint MinLocal(FMath::Min(LowLocal.X, HighLocal.X), FMath::Min(LowLocal.Y, HighLocal.Y));
 	const FIntPoint Size = (GetQuarterTurns() % 2 == 0)
 		? ChannelSize
@@ -274,8 +273,8 @@ FGridRect APuzzleRotatingObstacle::GetRegion() const
 	const int32 Side = FMath::Max(FootprintSize.X, FootprintSize.Y);
 	const FIntPoint WorldFootprint = GetWorldFootprint();
 
-	// Both differences are even because of the parity rule, so the square lands on cell
-	// boundaries and shares its centre with the footprint.
+	// 홀짝 규칙 덕분에 두 차이가 모두 짝수이므로, 정사각형이 셀 경계에 맞게 놓이고
+	// 풋프린트와 중심을 공유한다.
 	const FIntPoint Inset((WorldFootprint.X - Side) / 2, (WorldFootprint.Y - Side) / 2);
 	return FGridRect(GetRect().Min + Inset, FIntPoint(Side, Side));
 }
@@ -312,8 +311,8 @@ void APuzzleRotatingObstacle::GatherOccupiedCells(TArray<FIntPoint>& OutCells) c
 	OutCells.Reserve(OutCells.Num() + All.Num());
 	for (const FIntPoint& Cell : All)
 	{
-		// The channel is left unclaimed on purpose: blocks are pushed into it and the pawn
-		// walks through it, which is the whole point of the piece.
+		// 홈은 일부러 점유하지 않고 비워 둔다: 블록을 안으로 밀어 넣고 폰이 통과해 지나가는
+		// 것이 이 피스의 존재 이유다.
 		if (!Channel.Contains(Cell))
 		{
 			OutCells.Add(Cell);
@@ -321,7 +320,7 @@ void APuzzleRotatingObstacle::GatherOccupiedCells(TArray<FIntPoint>& OutCells) c
 	}
 }
 
-// ---------------------------------------------------------------------------- Riders
+// ---------------------------------------------------------------------------- 동승 블록
 
 bool APuzzleRotatingObstacle::IsAttachedToInnerFace(const APuzzleBlock& Block) const
 {
@@ -335,8 +334,8 @@ bool APuzzleRotatingObstacle::IsAttachedToInnerFace(const APuzzleBlock& Block) c
 
 	for (const FIntPoint& Cell : Cells)
 	{
-		// Only the part of the block that is actually inside the opening can touch an inner
-		// face. Cells hanging out past the open end are carried along regardless.
+		// 실제로 홈 안에 들어와 있는 블록 부분만 안쪽 면에 닿을 수 있다. 열린 끝 너머로
+		// 삐져나온 셀은 어차피 함께 실려 간다.
 		if (!Channel.Contains(Cell))
 		{
 			continue;
@@ -370,9 +369,9 @@ void APuzzleRotatingObstacle::GatherRiders(TArray<APuzzleBlock*>& OutRiders) con
 			continue;
 		}
 
-		// The design excludes the elevator by name. It is a goal piece whose door facing is
-		// the puzzle's state, so having a passing structure re-aim it would be a second,
-		// hidden way to solve the level.
+		// 디자인에서 엘리베이터를 명시적으로 제외했다. 엘리베이터는 문 방향이 곧 퍼즐의
+		// 상태인 목표 피스이므로, 지나가는 구조물이 그 방향을 바꿔 버리면 레벨을 푸는 숨은
+		// 두 번째 방법이 생겨 버린다.
 		if (Block->IsA<APuzzleElevatorBlock>())
 		{
 			continue;
@@ -385,7 +384,7 @@ void APuzzleRotatingObstacle::GatherRiders(TArray<APuzzleBlock*>& OutRiders) con
 	}
 }
 
-// ---------------------------------------------------------------------------- Sweep
+// ---------------------------------------------------------------------------- 스윕
 
 void APuzzleRotatingObstacle::GatherSweptCells(
 	const TArray<FIntPoint>& MovingCells, int32 TurnSign, TSet<FIntPoint>& OutCells) const
@@ -412,8 +411,8 @@ void APuzzleRotatingObstacle::GatherSweptCells(
 
 		if (!Span.IsFullCircle())
 		{
-			// Widening the wedge by the turn is exactly the region the cell passes through:
-			// a rotation only adds to an angle and leaves the radius alone.
+			// 부채꼴을 회전량만큼 넓힌 것이 정확히 셀이 지나가는 영역이다: 회전은 각도에만
+			// 더해지고 반지름은 건드리지 않기 때문이다.
 			if (Turn < 0.0)
 			{
 				Span.StartAngle += Turn;
@@ -456,8 +455,8 @@ bool APuzzleRotatingObstacle::FindPawnRefuge(
 		return false;
 	}
 
-	// Walls are walked around rather than through, so the pawn is never pushed somewhere it
-	// could not have reached on foot.
+	// 벽은 뚫고 지나가지 않고 돌아서 가므로, 폰이 걸어서 갈 수 없었던 곳으로 밀려나는
+	// 일은 없다.
 	TSet<FIntPoint> Visited;
 	TArray<FIntPoint> Queue;
 	Visited.Add(From);
@@ -487,8 +486,8 @@ bool APuzzleRotatingObstacle::FindPawnRefuge(
 				continue;
 			}
 
-			// Anything holding a cell here is scenery or a block that is staying put; the
-			// pieces that are about to move released their cells before this ran.
+			// 여기서 셀을 잡고 있는 것은 배경이거나 제자리에 남는 블록이다. 곧 움직일 피스들은
+			// 이 코드가 실행되기 전에 자기 셀을 놓았다.
 			if (Grid->IsCellOccupied(Next))
 			{
 				continue;
@@ -507,7 +506,7 @@ bool APuzzleRotatingObstacle::FindPawnRefuge(
 	return false;
 }
 
-// ---------------------------------------------------------------------------- Rotation
+// ---------------------------------------------------------------------------- 회전
 
 bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 {
@@ -544,7 +543,7 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 		}
 	}
 
-	// ---- Pass one: work out where everything lands, and refuse before touching anything.
+	// ---- 첫 번째 패스(검사 패스): 모든 것이 어디에 놓일지 계산하고, 무엇도 건드리기 전에 거부한다.
 
 	TArray<FIntPoint> MovingCells;
 	GatherOccupiedCells(MovingCells);
@@ -564,8 +563,8 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 
 	const FGridRect Destination = GridFootprint::RotateRect(GetRect(), Region, Sign);
 
-	// Every cell the structure or a passenger comes to rest on has to be floor, including
-	// the channel: an opening hanging over a drop is not somewhere anything can be pushed.
+	// 구조물이나 동승 블록이 멈춰 서는 모든 셀은 바닥이어야 하며 홈도 포함된다: 낭떠러지
+	// 위에 걸린 홈은 무엇도 밀어 넣을 수 있는 곳이 아니다.
 	TSet<FIntPoint> DestinationCells;
 	{
 		TArray<FIntPoint> Cells;
@@ -589,8 +588,20 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 		}
 	}
 
+	// 회전 경로는 실제로 이웃 셀을 스치는 것만으로 잰다. 사각 본체는 모서리가 밖으로 나가므로
+	// 자기 셀도 넣지만, 제자리에서 도는 기둥 같은 파생 클래스는 동승 블록만 넣는다.
+	TArray<FIntPoint> SweepSource;
+	if (SweepsOwnCells())
+	{
+		GatherOccupiedCells(SweepSource);
+	}
+	for (const APuzzleBlock* Rider : Riders)
+	{
+		Rider->GatherOccupiedCells(SweepSource);
+	}
+
 	TSet<FIntPoint> Swept;
-	GatherSweptCells(MovingCells, Sign, Swept);
+	GatherSweptCells(SweepSource, Sign, Swept);
 
 	const TSet<FIntPoint> MovingSet(MovingCells);
 
@@ -601,7 +612,7 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 			continue;
 		}
 
-		// Outside the grid and cells with no floor are open air the structure swings over.
+		// 그리드 바깥과 바닥이 없는 셀은 구조물이 그 위로 지나가는 허공이다.
 		if (!Grid->IsValidCell(Cell))
 		{
 			continue;
@@ -632,8 +643,8 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 		}
 	}
 
-	// The pawn is part of the space. It cannot ride along, so it is pushed clear -- and if
-	// there is nowhere clear to push it to, nothing turns.
+	// 폰도 공간의 일부다. 함께 실려 갈 수는 없으므로 밀어내는데, 밀어낼 빈자리가 없으면
+	// 아무것도 돌지 않는다.
 	AGridPawn* Pawn = Subsystem->GetGridPawn();
 	TOptional<FIntPoint> PawnRefuge;
 
@@ -660,10 +671,10 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 		}
 	}
 
-	// ---- Pass two: commit.
+	// ---- 두 번째 패스(커밋 패스).
 
-	// Every mover lets go before any of them claims, so a cell changing hands between two of
-	// them is not refused because the previous holder has not moved yet.
+	// 누군가 셀을 잡기 전에 모든 이동 대상이 먼저 셀을 놓는다. 그래야 둘 사이에서 주인이
+	// 바뀌는 셀이, 이전 주인이 아직 안 움직였다는 이유로 거부되지 않는다.
 	Grid->ClearAllOccupantsOf(this);
 	for (APuzzleBlock* Rider : Riders)
 	{
@@ -678,8 +689,8 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 		Riders[Index]->BeginRotation(Pivot, Sign, RotateDuration, RiderDestinations[Index]);
 	}
 
-	// Moved at the start rather than the end, unlike the rotation tile: there the pawn rides
-	// the space round, whereas here a wall is arriving in the cell it is standing in.
+	// 회전 타일과 달리 끝이 아니라 시작 시점에 옮긴다: 거기서는 폰이 공간과 함께 실려
+	// 돌지만, 여기서는 폰이 서 있는 셀로 벽이 들어온다.
 	if (Pawn && PawnRefuge.IsSet())
 	{
 		Pawn->TeleportToCell(PawnRefuge.GetValue());
@@ -694,11 +705,11 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 	return true;
 }
 
-// ---------------------------------------------------------------------------- Visual
+// ---------------------------------------------------------------------------- 비주얼
 
 void APuzzleRotatingObstacle::RefreshVisual()
 {
-	// Deliberately not calling Super: the inherited single box spans the channel.
+	// 일부러 Super를 호출하지 않는다: 상속받은 단일 박스는 홈을 가로지른다.
 	const double CellSize = Grid ? Grid->CellSize : 100.0;
 
 	const double HalfX = FootprintSize.X * 0.5;
@@ -709,9 +720,9 @@ void APuzzleRotatingObstacle::RefreshVisual()
 	const int32 ChannelMinY = ChannelOffset.Y;
 	const int32 ChannelMaxY = ChannelOffset.Y + ChannelSize.Y;
 
-	// The footprint minus the channel, cut into four disjoint rectangles: the two long walls
-	// beside the channel and the two end caps. Any of them may be empty, which is what leaves
-	// an end of the channel open.
+	// 풋프린트에서 홈을 뺀 부분을 서로 겹치지 않는 네 개의 사각형으로 자른다: 홈 양옆의
+	// 긴 벽 둘과 양 끝 마감 둘. 어느 것이든 비어 있을 수 있으며, 그것이 홈의 한쪽 끝을
+	// 열어 둔다.
 	const int32 Slabs[4][4] = {
 		{ 0,			ChannelMinX,	0,				FootprintSize.Y },
 		{ ChannelMaxX,	FootprintSize.X, 0,				FootprintSize.Y },
@@ -752,8 +763,8 @@ void APuzzleRotatingObstacle::RefreshVisual()
 			Height / 100.0));
 	}
 
-	// The hatched faces from the design: a thin panel on each wall that borders the channel,
-	// in the elevator door's material so "this is the face things stick to" reads at a glance.
+	// 디자인의 빗금 친 면: 홈에 접한 벽마다 얇은 패널을 붙인다. "여기가 물건이 붙는 면"이라는
+	// 것이 한눈에 읽히도록 엘리베이터 문과 같은 머티리얼을 쓴다.
 	constexpr double FaceThickness = 12.0;
 	const double FaceHeight = FMath::Max(Height * InnerFaceHeightRatio, 1.0);
 
@@ -786,32 +797,32 @@ void APuzzleRotatingObstacle::RefreshVisual()
 		FVector Location(0.0, 0.0, FaceHeight * 0.5);
 		FVector Scale(1.0, 1.0, FaceHeight / 100.0);
 
-		// Pushed half a thickness into the opening so the panel stands proud of the wall
-		// instead of being half sunk into it, where it would read as a seam.
+		// 패널을 두께의 절반만큼 열린 쪽으로 밀어 넣어, 벽에 반쯤 파묻혀 이음새처럼 보이는
+		// 대신 벽에서 도드라져 보이게 한다.
 		switch (Index)
 		{
-		case 0:		// west wall, facing east into the channel
+		case 0:		// 서쪽 벽, 홈 안쪽인 동쪽을 향한다
 			Location.X = (ChannelMinX - HalfX) * CellSize + FaceThickness * 0.5;
 			Location.Y = ChannelCentreY;
 			Scale.X = FaceThickness / 100.0;
 			Scale.Y = ChannelSpanY / 100.0;
 			break;
 
-		case 1:		// east wall
+		case 1:		// 동쪽 벽
 			Location.X = (ChannelMaxX - HalfX) * CellSize - FaceThickness * 0.5;
 			Location.Y = ChannelCentreY;
 			Scale.X = FaceThickness / 100.0;
 			Scale.Y = ChannelSpanY / 100.0;
 			break;
 
-		case 2:		// south wall
+		case 2:		// 남쪽 벽
 			Location.X = ChannelCentreX;
 			Location.Y = (ChannelMinY - HalfY) * CellSize + FaceThickness * 0.5;
 			Scale.X = ChannelSpanX / 100.0;
 			Scale.Y = FaceThickness / 100.0;
 			break;
 
-		default:	// north wall
+		default:	// 북쪽 벽
 			Location.X = ChannelCentreX;
 			Location.Y = (ChannelMaxY - HalfY) * CellSize - FaceThickness * 0.5;
 			Scale.X = ChannelSpanX / 100.0;
@@ -824,12 +835,12 @@ void APuzzleRotatingObstacle::RefreshVisual()
 	}
 }
 
-// ---------------------------------------------------------------------------- Lifecycle
+// ---------------------------------------------------------------------------- 생명주기
 
 void APuzzleRotatingObstacle::RegisterWithSubsystem(UPuzzleSubsystem& Subsystem)
 {
-	// Not in the pushable-block list: the drag code would try to shove it, and a rotation
-	// tile would see a piece far too big to be turned by it.
+	// 밀 수 있는 블록 목록에는 넣지 않는다: 드래그 코드가 이것을 밀려 들 것이고, 회전
+	// 타일은 자기가 돌리기엔 너무 큰 피스를 보게 된다.
 	Subsystem.RegisterObstacle(this);
 }
 
@@ -853,9 +864,9 @@ void APuzzleRotatingObstacle::BeginPlay()
 		return;
 	}
 
-	// Belt and braces: OnConstruction already enforces this, but every destination the piece
-	// computes is measured from the turning square, and a square half a cell off the grid
-	// would put blocks and the pawn somewhere no other system can express.
+	// 이중 안전장치: OnConstruction에서 이미 강제하지만, 이 피스가 계산하는 모든 목적지는
+	// 회전 정사각형을 기준으로 재며, 그리드에서 반 셀 어긋난 정사각형은 블록과 폰을 다른
+	// 어떤 시스템도 표현할 수 없는 자리에 놓게 된다.
 	ensureMsgf((FootprintSize.X % 2) == (FootprintSize.Y % 2),
 		TEXT("%s: footprint %dx%d breaks the parity rule; the turning square is off the grid."),
 		*GetName(), FootprintSize.X, FootprintSize.Y);
@@ -872,8 +883,8 @@ void APuzzleRotatingObstacle::BeginPlay()
 		Channel.Size.X, Channel.Size.Y, Channel.Min.X, Channel.Min.Y,
 		Region.Size.X, Region.Size.Y, Region.Min.X, Region.Min.Y);
 
-	// The channel is only useful if it is floor, and a turn that lands the body off the
-	// platform is refused at runtime -- worth saying now rather than when the player tries.
+	// 홈은 바닥일 때만 쓸모가 있고, 본체가 플랫폼 밖에 놓이는 회전은 런타임에 거부된다.
+	// 플레이어가 시도할 때가 아니라 지금 미리 알려 두는 편이 낫다.
 	TArray<FIntPoint> ChannelCells;
 	Channel.GatherCells(ChannelCells);
 	for (const FIntPoint& Cell : ChannelCells)
@@ -901,7 +912,7 @@ bool APuzzleRotatingObstacle::CanEditChange(const FProperty* InProperty) const
 		return true;
 	}
 
-	// Neither means anything here: the structure is turned by its lever, never pushed.
+	// 여기서는 둘 다 의미가 없다: 구조물은 레버로만 돌리지 절대 밀지 않는다.
 	const FName Name = InProperty->GetFName();
 	return Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, MoveAxis)
 		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, bOneStepPerDrag);
@@ -909,16 +920,16 @@ bool APuzzleRotatingObstacle::CanEditChange(const FProperty* InProperty) const
 
 #endif
 
-// ---------------------------------------------------------------------------- Console
+// ---------------------------------------------------------------------------- 콘솔
 
 namespace
 {
 	/**
-	 * Turn an obstacle without its lever.
+	 * 레버 없이 장애물을 돌린다.
 	 *
-	 * The lever can only be used from a cell beside it, so the one case the design calls for
-	 * -- the pawn standing inside the channel when the structure turns -- cannot be reached
-	 * by playing normally. This exists so it can still be tested.
+	 * 레버는 옆 셀에서만 조작할 수 있으므로, 디자인이 요구하는 한 가지 경우 -- 구조물이 돌 때
+	 * 폰이 홈 안에 서 있는 상황 -- 는 일반 플레이로는 만들 수 없다. 그 경우도 테스트할 수
+	 * 있도록 이 명령을 둔다.
 	 */
 	void RotateObstacleCommand(const TArray<FString>& Args, UWorld* World)
 	{

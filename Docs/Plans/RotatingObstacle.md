@@ -431,3 +431,28 @@ PIE 시작 위치를 승강장으로 옮기려면 `(950, 2450, −540)`(셀 (79,
 5. 모든 블록이 한 드래그에 한 칸만 움직이는지.
 
 손맛 조정이 필요하면 `TurnThresholdDegrees`(레버)와 `RotateDuration`(장애물)이 손잡이다.
+
+---
+
+## 13. 기둥형 변형 `APuzzleRotatingPillar` (2026-09-07)
+
+"1x1 셀 기둥 하나인데 동서남북 부착 면을 직접 고르고, 회전 규칙은 큰 장애물과 같은 것"
+요청으로 추가했다. `Puzzle/PuzzleRotatingPillar.h/.cpp`, `APuzzleRotatingObstacle` 파생.
+
+| 항목 | 큰 장애물 | 기둥 |
+|---|---|---|
+| 풋프린트 | 저작 (홀짝 규칙) | **1x1 고정** (`CanEditChange`로 잠금, 정규화가 되돌림) |
+| 높이 | 300 | **400** (셀 4칸). 프로퍼티로 조정 |
+| 부착 면 | 홈 안쪽 벽에서 유도 | **`bAttachNorth/East/South/West`** 네 개 bool, 로컬 프레임. 돌면 면도 따라 돈다 (`RotateDirection`) |
+| 동승 판정 | 홈 셀이 솔리드 셀과 변 공유 | 블록 셀 하나가 **켜진 면 바깥 이웃 셀**과 일치 |
+| 본체 자신의 회전 경로 | 모서리가 이웃 셀을 스치므로 검사에 포함 | **원기둥이라 제외** (`SweepsOwnCells() = false`). 부착 면이 아닌 쪽에 붙은 블록은 회전을 막지 않고 제자리에 남는다 |
+| 비주얼 | 슬랩 4장 + 빗금 패널 4장 | 슬랩 0번을 **원기둥**으로, 켜진 면마다 바깥쪽에 빗금 패널 |
+| 레버 | `APuzzleLever::Target` | 그대로 (파생 클래스라 할당 가능) |
+| 회전 로직 | `TryRotate` | **같은 함수** (동승 → 목적지 바닥 → 회전 경로 → 폰 밀어내기 → 커밋) |
+
+`APuzzleRotatingObstacle`에 넣은 변경: `IsAttachedToInnerFace`·`NormaliseAuthoring` 가상화,
+`SlabMeshes`/`InnerFaceMeshes`를 protected로, `SweepsOwnCells()` 훅과 `TryRotate`의 회전 경로
+입력을 그 훅으로 고르는 코드. 큰 장애물의 동작은 바뀌지 않는다(훅 기본값 true).
+
+배치: 액터 배치 → `Rotating Pillar` 카테고리에서 면을 켜고 → 레버의 `Target`에 연결.
+회전 시 기둥 자신의 셀은 그대로이고, 부착 면에 붙은 블록만 기둥 중심을 축으로 90도 돈다.

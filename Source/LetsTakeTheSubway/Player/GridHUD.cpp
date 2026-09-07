@@ -1,14 +1,16 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Player/GridHUD.h"
 
 #include "Grid/GridActor.h"
 #include "Grid/GridDebug.h"
+#include "NPC/GridNPC.h"
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
 #include "Puzzle/PuzzleSubsystem.h"
 
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 
 void AGridHUD::DrawHUD()
 {
@@ -105,6 +107,21 @@ void AGridHUD::DrawHUD()
 
 		DrawText(Status, Label, X, Y);
 		Y += LineHeight;
+	}
+
+	// 행인은 퍼즐에 속하지 않으므로 서브시스템이 아니라 월드에서 직접 센다.
+	{
+		int32 NumNPCs = 0;
+		for (TActorIterator<AGridNPC> It(GetWorld()); It; ++It)
+		{
+			++NumNPCs;
+		}
+
+		if (NumNPCs > 0)
+		{
+			DrawText(FString::Printf(TEXT("NPCs alive %d"), NumNPCs), Label, X, Y);
+			Y += LineHeight;
+		}
 	}
 
 	if (GridController && !GridController->GetFeedbackText().IsEmpty())

@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -12,15 +12,15 @@ class APuzzleRotatingObstacle;
 class UStaticMeshComponent;
 
 /**
- * The wheel that turns one rotating obstacle.
+ * 돌아가는 장애물 하나를 돌리는 휠(레버 휠).
  *
- * Drawn as the design sketched it: a post with a handwheel on top, turned by taking hold of
- * it and dragging round. One drag is one quarter turn however far the cursor is swung, so a
- * solution is a countable number of moves rather than a matter of how hard the player spins.
+ * 디자인 스케치 그대로 그린다: 기둥 위에 핸드휠이 얹혀 있고, 그것을 잡고 빙 돌려서 조작한다.
+ * 커서를 얼마나 크게 휘두르든 드래그 한 번은 90도 회전 한 번이므로, 풀이는 플레이어가
+ * 얼마나 세게 돌리느냐가 아니라 셀 수 있는 이동 횟수로 정해진다.
  *
- * The pawn has to be standing next to it. Without that the structure could be turned from
- * anywhere on the platform, and the walk to the lever -- which is most of what makes the
- * puzzle a puzzle once the obstacle is in the way -- would not matter.
+ * 폰은 레버 옆에 서 있어야 한다. 그렇지 않으면 플랫폼 어디서든 구조물을 돌릴 수 있게 되고,
+ * 장애물이 길을 막은 뒤 레버까지 걸어가는 과정 -- 이 퍼즐을 퍼즐답게 만드는 요소의
+ * 대부분 -- 이 무의미해진다.
  */
 UCLASS(HideCategories = (Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, Replication))
 class LETSTAKETHESUBWAY_API APuzzleLever : public AActor
@@ -30,48 +30,48 @@ class LETSTAKETHESUBWAY_API APuzzleLever : public AActor
 public:
 	APuzzleLever();
 
-	/** The structure this wheel turns. Set per placed lever, not on the class. */
+	/** 이 휠이 돌리는 구조물. 클래스가 아니라 배치된 레버마다 설정한다. */
 	UPROPERTY(EditInstanceOnly, Category = "Puzzle Lever")
 	TObjectPtr<APuzzleRotatingObstacle> Target;
 
-	/** Post height in cm. The wheel sits on top of it. */
+	/** 기둥 높이(cm). 휠은 그 위에 얹힌다. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Lever", meta = (ClampMin = 10.0))
 	float PostHeight = 90.0f;
 
-	/** Wheel diameter in cm. */
+	/** 휠 지름(cm). */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Lever", meta = (ClampMin = 10.0))
 	float WheelDiameter = 80.0f;
 
 	/**
-	 * How far the cursor must be swung round the wheel before the quarter turn fires.
+	 * 90도 회전이 발동하기까지 커서를 휠 둘레로 얼마나 돌려야 하는지.
 	 *
-	 * Low enough that a deliberate twist registers, high enough that a small wobble while
-	 * clicking does not turn a structure the size of a room.
+	 * 의도적인 비틀기는 인식될 만큼 낮게, 클릭하다 살짝 흔들린 것만으로 방 하나만 한
+	 * 구조물이 돌지는 않을 만큼 높게 잡는다.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Lever", meta = (ClampMin = 5.0, ClampMax = 180.0))
 	float TurnThresholdDegrees = 60.0f;
 
-	// ---------------------------------------------------------------- Queries
+	// ---------------------------------------------------------------- 조회
 
 	FIntPoint GetCell() const { return Cell; }
 
-	/** World position of the wheel, which is what a drag is measured around. */
+	/** 휠의 월드 위치. 드래그는 이 점을 중심으로 잰다. */
 	FVector GetWheelWorldLocation() const;
 
-	/** The four cells the lever can be worked from. */
+	/** 레버를 조작할 수 있는 네 개의 셀(조작 셀). */
 	void GetOperatingCells(TArray<FIntPoint>& OutCells) const;
 
 	bool IsPawnAdjacent(const AGridPawn* Pawn) const;
 
-	// ---------------------------------------------------------------- Use
+	// ---------------------------------------------------------------- 사용
 
-	/** Turn the target a quarter, or explain why not. TurnSign +1 reads as clockwise. */
+	/** 대상을 90도 돌리거나 왜 안 되는지 알려준다. TurnSign +1이 시계 방향이다. */
 	bool TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReason = nullptr);
 
-	/** Spin the wheel mesh while it is being dragged. Purely visual; zero puts it back. */
+	/** 드래그하는 동안 휠 메시를 돌린다. 순전히 비주얼용이며 0을 주면 원위치한다. */
 	void SetWheelPreviewAngle(float Degrees);
 
-	// ---------------------------------------------------------------- Lifecycle
+	// ---------------------------------------------------------------- 생명주기
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -91,14 +91,14 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Lever")
 	TObjectPtr<UStaticMeshComponent> PostMesh;
 
-	/** Turned by the drag. Everything that spins hangs off this so one rotation moves it all. */
+	/** 드래그로 돌아가는 부분. 도는 것은 전부 여기에 매달려 있어 회전 하나로 전체가 움직인다. */
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Lever")
 	TObjectPtr<USceneComponent> WheelPivot;
 
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Lever")
 	TObjectPtr<UStaticMeshComponent> WheelMesh;
 
-	/** A stub on the rim, so the wheel's rotation is visible on an otherwise round shape. */
+	/** 테두리에 붙은 돌기. 이것이 없으면 둥근 모양이라 휠의 회전이 보이지 않는다. */
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Lever")
 	TObjectPtr<UStaticMeshComponent> HandleMesh;
 

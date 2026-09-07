@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -15,16 +15,16 @@ class APuzzleRotatingObstacle;
 class APuzzleRotationTile;
 
 /**
- * Keeps track of the puzzle pieces in the level and the rules that span more than one of
- * them.
+ * 레벨에 있는 퍼즐 조각들과, 조각 하나를 넘어 여러 조각에 걸치는 규칙들을
+ * 관리한다.
  *
- * The grid actor owns cell occupancy because that is a property of cells, and every mover
- * benefits from it. What lives here instead is everything that needs to see the puzzle as a
- * whole: which blocks and tiles exist, whether an animation is currently running so input
- * should be ignored, and the "a block came to rest, does a tile want to spin it" rule.
+ * 셀 점유는 셀의 속성이고 모든 이동체가 그 혜택을 보므로 그리드 액터가 소유한다. 대신
+ * 여기에는 퍼즐 전체를 봐야 하는 것들이 산다: 어떤 블록과 타일이 존재하는지, 지금
+ * 애니메이션이 진행 중이라 입력을 무시해야 하는지, 그리고 "블록이 정지했는데 타일이
+ * 그것을 돌리고 싶어 하는가" 규칙.
  *
- * Keeping the registries here also means the drag code never has to sweep the level with an
- * actor iterator while the player is moving the mouse.
+ * 등록부를 여기에 두면 플레이어가 마우스를 움직이는 동안 드래그 코드가 액터 이터레이터로
+ * 레벨을 훑을 필요도 없어진다.
  */
 UCLASS()
 class LETSTAKETHESUBWAY_API UPuzzleSubsystem : public UWorldSubsystem
@@ -32,7 +32,7 @@ class LETSTAKETHESUBWAY_API UPuzzleSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	/** The subsystem for an actor's world, or null outside a game world. */
+	/** 액터가 속한 월드의 서브시스템. 게임 월드 밖에서는 null. */
 	static UPuzzleSubsystem* Get(const UObject* WorldContext);
 
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
@@ -44,11 +44,11 @@ public:
 	void UnregisterTile(APuzzleRotationTile* Tile);
 
 	/**
-	 * Rotating obstacles are kept apart from the pushable blocks.
+	 * 돌아가는 장애물은 밀 수 있는 블록과 따로 관리한다.
 	 *
-	 * They derive from the same class, but nothing that treats a block as something to shove
-	 * around should ever pick one up: not the drag code, not a rotation tile deciding what is
-	 * standing on it, and not an obstacle looking for passengers.
+	 * 같은 클래스에서 파생되지만, 블록을 밀어낼 대상으로 다루는 코드는 어느 것도 장애물을
+	 * 집어서는 안 된다: 드래그 코드도, 위에 무엇이 서 있는지 판단하는 회전 타일도, 동승
+	 * 블록을 찾는 장애물 자신도.
 	 */
 	void RegisterObstacle(APuzzleRotatingObstacle* Obstacle);
 	void UnregisterObstacle(APuzzleRotatingObstacle* Obstacle);
@@ -65,51 +65,50 @@ public:
 	int32 GetNumObstacles() const { return Obstacles.Num(); }
 
 	/**
-	 * True while anything is mid-animation.
+	 * 무언가가 애니메이션 중인 동안 true.
 	 *
-	 * Input is dropped rather than queued during a rotation: the player cannot see the cells
-	 * the pieces are heading for, so a click made mid-spin is almost never the one they would
-	 * make once it settled.
+	 * 회전 중의 입력은 큐에 넣지 않고 버린다: 플레이어는 조각들이 향해 가는 셀을 볼 수
+	 * 없으므로, 회전 도중에 한 클릭은 회전이 끝난 뒤에 했을 클릭과 거의 언제나 다른
+	 * 것이다.
 	 */
 	bool IsInputLocked() const;
 
 	APuzzleBlock* FindBlockAtCell(const AGridActor& Grid, FIntPoint Cell) const;
 
 	/**
-	 * Every piece the cursor can hit, as plain actors, for a trace that needs to see past all
-	 * of them to the floor behind.
+	 * 커서에 맞을 수 있는 모든 조각을 일반 액터로 돌려준다. 그것들 전부를 지나쳐 뒤쪽 바닥을
+	 * 봐야 하는 트레이스용이다.
 	 *
-	 * Obstacles and levers are included as well as blocks. The camera looks down steeply, so
-	 * anything standing up hides floor cells behind it, and those cells must stay clickable.
+	 * 블록뿐 아니라 장애물과 레버도 포함한다. 카메라가 가파르게 내려다보므로 서 있는 것은
+	 * 무엇이든 뒤쪽 바닥 셀을 가리는데, 그 셀들은 계속 클릭할 수 있어야 한다.
 	 */
 	void GetBlockActors(TArray<AActor*>& OutActors) const;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
 	/**
-	 * Work out which blocks stand between the camera and the pawn, and flatten them.
+	 * 카메라와 폰 사이에 서 있는 블록을 찾아내 납작하게 만든다.
 	 *
-	 * The camera is fixed at a steep angle, so a three-metre elevator hides roughly two cells
-	 * of floor behind it. Rather than moving the camera, the offenders are pressed down to a
-	 * slab for as long as they are in the way.
+	 * 카메라가 가파른 각도로 고정돼 있어 3미터 엘리베이터는 뒤쪽 바닥을 대략 두 셀 가린다.
+	 * 카메라를 옮기는 대신, 방해하는 블록을 방해가 되는 동안 슬랩으로 눌러 둔다.
 	 */
 	void UpdateOcclusion(const FVector& CameraLocation, const APawn* Pawn, float SweepRadius);
 
 	int32 GetNumOccludingBlocks() const { return NumOccludingBlocks; }
 #endif
 
-	/** The cell the pawn stands on plus the one it is walking into, if any. */
+	/** 폰이 서 있는 셀과, 있다면 걸어 들어가고 있는 셀. */
 	void GetPawnReservedCells(TArray<FIntPoint>& OutCells) const;
 
 	AGridPawn* GetGridPawn() const;
 	AGridPlayerController* GetGridController() const;
 
-	/** Route a message to the on-screen feedback line, if there is a controller to show it. */
+	/** 보여 줄 컨트롤러가 있다면 화면의 피드백 메시지 줄로 메시지를 보낸다. */
 	void ShowFeedback(const FString& Message, const FLinearColor& Color) const;
 
 	/**
-	 * A block has finished the last step of a drag. If it now sits entirely inside a rotation
-	 * tile, that tile turns the space.
+	 * 블록이 드래그의 마지막 걸음을 마쳤다. 이제 회전 타일 안에 완전히 들어가 있다면 그
+	 * 타일이 공간을 돌린다.
 	 */
 	void NotifyBlockCameToRest(APuzzleBlock* Block);
 

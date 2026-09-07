@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Grid/GridDebugDrawComponent.h"
 
@@ -24,8 +24,8 @@ void FGridLabelDrawHelper::DrawDebugLabels(UCanvas* Canvas, APlayerController*)
 	UFont* Font = GEngine->GetSmallFont();
 	const FFontRenderInfo FontInfo = Canvas->CreateFontRenderInfo(true, true);
 
-	// Same normalised-to-canvas mapping the engine helper uses, so labels land on their cell
-	// under DPI scaling and constrained aspect ratios.
+	// 엔진 헬퍼가 쓰는 것과 같은 정규화 좌표 -> 캔버스 매핑이다. 그래야 DPI 스케일링과
+	// 제한된 종횡비에서도 라벨이 제 셀 위에 놓인다.
 	const float InvDPIScale = 1.0f / Canvas->GetDPIScale();
 	const FIntRect& ViewRect = View->UnscaledViewRect;
 	const float HalfWidth = ViewRect.Width() * 0.5f;
@@ -70,7 +70,7 @@ namespace
 	}
 
 #if WITH_EDITOR
-	/** Editor-viewport-only variant of the stock debug proxy. */
+	/** 기본 디버그 프록시의 에디터 뷰포트 전용 변형. */
 	class FGridDebugSceneProxy final : public FDebugRenderSceneProxy
 	{
 	public:
@@ -86,8 +86,8 @@ namespace
 
 		virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override
 		{
-			// FDebugRenderSceneProxy does not implement this, and the default relevance has
-			// no dynamic pass, so without the override nothing would draw at all.
+			// FDebugRenderSceneProxy는 이것을 구현하지 않고, 기본 relevance에는 다이나믹 패스가
+			// 없으므로 오버라이드하지 않으면 아무것도 그려지지 않는다.
 			const bool bVisible = View->Family->EngineShowFlags.GetSingleFlag(ViewFlagIndex) && IsShown(View);
 
 			FPrimitiveViewRelevance Result;
@@ -101,7 +101,7 @@ namespace
 		virtual uint32 GetMemoryFootprint() const override { return sizeof(*this) + GetAllocatedSize(); }
 	};
 
-	/** Appends one axis-aligned quad to a mesh batch. */
+	/** 축 정렬 쿼드 하나를 메시 배치에 추가한다. */
 	void AddCellQuad(FDebugRenderSceneProxy::FMesh& Mesh, const FVector& Centre, double HalfSize, double Z)
 	{
 		const uint32 BaseIndex = static_cast<uint32>(Mesh.Vertices.Num());
@@ -131,10 +131,10 @@ UGridDebugDrawComponent::UGridDebugDrawComponent()
 	bIsEditorOnly = true;
 	bHiddenInGame = true;
 
-	// The engine declares this setter inside WITH_EDITORONLY_DATA, so calling it unguarded
-	// compiles in the editor target and breaks the game target. Nothing is lost by skipping
-	// it there: all the setter does is raise bIsVisualizationComponent, which is editor-only
-	// data, and bIsEditorOnly, which the line above already set.
+	// 엔진은 이 세터를 WITH_EDITORONLY_DATA 안에 선언하므로, 가드 없이 호출하면 에디터
+	// 타깃에서는 컴파일되지만 게임 타깃은 깨진다. 거기서 건너뛰어도 잃는 것은 없다: 이 세터가
+	// 하는 일은 에디터 전용 데이터인 bIsVisualizationComponent를 켜는 것과, 바로 윗줄에서
+	// 이미 설정한 bIsEditorOnly를 켜는 것뿐이다.
 #if WITH_EDITORONLY_DATA
 	SetIsVisualizationComponent(true);
 #endif
@@ -153,8 +153,8 @@ FBoxSphereBounds UGridDebugDrawComponent::CalcBounds(const FTransform& LocalToWo
 		return FBoxSphereBounds(LocalToWorld.GetLocation(), FVector::ZeroVector, 0.0f);
 	}
 
-	// Bounds must cover the whole region or the proxy gets culled while the actor's own
-	// origin is off screen.
+	// 바운드가 영역 전체를 덮어야 한다. 그렇지 않으면 액터 원점이 화면 밖에 있을 때
+	// 프록시가 컬링된다.
 	const FVector Origin = Grid->GetGridOrigin();
 	const FBox Region(
 		Origin - FVector(0.0, 0.0, Grid->CellSize),
@@ -166,8 +166,8 @@ FBoxSphereBounds UGridDebugDrawComponent::CalcBounds(const FTransform& LocalToWo
 FDebugRenderSceneProxy* UGridDebugDrawComponent::CreateDebugSceneProxy()
 {
 #if WITH_EDITOR
-	// Returning null below leaves the label delegate registered with its old text list, so
-	// always start from an empty one; InitDelegateHelper refills it when a proxy is made.
+	// 아래에서 null을 반환하면 라벨 델리게이트가 이전 텍스트 목록을 든 채로 남으므로 항상
+	// 빈 목록에서 시작한다. 프록시가 만들어지면 InitDelegateHelper가 다시 채운다.
 	LabelHelper.ClearLabels();
 
 	AGridActor* Grid = Cast<AGridActor>(GetOwner());
@@ -185,15 +185,15 @@ FDebugRenderSceneProxy* UGridDebugDrawComponent::CreateDebugSceneProxy()
 
 	FGridDebugSceneProxy* Proxy = new FGridDebugSceneProxy(this);
 
-	// Never set Proxy->FarClippingDistance: it would clip the cell quads too. The label
-	// distance lives on the helper instead.
+	// Proxy->FarClippingDistance는 절대 설정하지 말 것: 셀 쿼드까지 잘린다. 라벨 거리는
+	// 대신 헬퍼에 둔다.
 	LabelHelper.LabelMaxDistance = Grid->bDrawCellCoords ? Grid->CoordLabelMaxDistance : 0.0;
 
 	const double CellSize = Grid->CellSize;
-	const double HalfSize = CellSize * 0.5 - 4.0;	// inset so cell borders stay readable
+	const double HalfSize = CellSize * 0.5 - 4.0;	// 셀 경계가 잘 보이도록 안쪽으로 줄인다
 
-	// One mesh batch per cell type: FMesh carries a single colour, so grouping by type keeps
-	// the whole grid down to a handful of draws instead of one per cell.
+	// 셀 타입당 메시 배치 하나: FMesh는 색을 하나만 가지므로, 타입별로 묶으면 그리드 전체가
+	// 셀마다 하나씩이 아니라 드로우 몇 개로 끝난다.
 	TMap<EGridCellType, FDebugRenderSceneProxy::FMesh> MeshesByType;
 	int32 LabelCount = 0;
 
@@ -225,8 +225,8 @@ FDebugRenderSceneProxy* UGridDebugDrawComponent::CreateDebugSceneProxy()
 				++LabelCount;
 			}
 
-			// Mark the borders where the step-height rule severed a connection, so a stair
-			// that is too steep is visible at a glance.
+			// 단차 높이 규칙이 연결을 끊은 경계를 표시해, 너무 가파른 계단을 한눈에 볼 수 있게
+			// 한다.
 			if (Grid->bDrawStepBreaks && Data.Type != EGridCellType::NoFloor)
 			{
 				if (X + 1 < Width)
@@ -263,7 +263,7 @@ FDebugRenderSceneProxy* UGridDebugDrawComponent::CreateDebugSceneProxy()
 		Proxy->Meshes.Add(MoveTemp(Pair.Value));
 	}
 
-	// Region outline.
+	// 영역 외곽선.
 	const FVector Origin = Grid->GetGridOrigin();
 	const FBox RegionBox(
 		Origin,

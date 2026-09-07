@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Puzzle/PuzzleElevatorBlock.h"
 
@@ -28,8 +28,8 @@ APuzzleElevatorBlock::APuzzleElevatorBlock()
 		DoorMesh->SetStaticMesh(CubeFinder.Object);
 	}
 
-	// A different greybox material, because the door is the one feature of this block the
-	// player has to read at a glance to know which way it can travel.
+	// 다른 그레이박스 머티리얼을 쓴다. 문은 이 블록이 어느 쪽으로 움직일 수 있는지
+	// 플레이어가 한눈에 읽어야 하는 유일한 특징이기 때문이다.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DoorMaterialFinder(
 		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_F0.MI_GreyBox_F0"));
 	if (DoorMaterialFinder.Succeeded())
@@ -45,8 +45,8 @@ EGridDirection APuzzleElevatorBlock::GetWorldDoorDirection() const
 
 EPuzzleMoveAxis APuzzleElevatorBlock::GetWorldMoveAxis() const
 {
-	// Derived from the door rather than from the authored axis, so the two can never drift
-	// apart after a rotation.
+	// 지정된 축이 아니라 문에서 유도한다. 그래야 회전 뒤에 둘이 서로 어긋나는 일이
+	// 절대 없다.
 	return LTTSPuzzle::AxisForDirection(GetWorldDoorDirection());
 }
 
@@ -59,20 +59,20 @@ void APuzzleElevatorBlock::RefreshVisual()
 		return;
 	}
 
-	// Placed in the local frame: the actor's yaw already carries the rotation, so the door
-	// slab follows the body without any extra maths.
+	// 로컬 프레임에 배치한다: 액터의 yaw가 이미 회전을 담당하므로 문 슬랩은 별도 계산
+	// 없이 몸체를 따라간다.
 	const double CellSize = 100.0;
 	const double HalfX = FootprintSize.X * CellSize * 0.5;
 	const double HalfY = FootprintSize.Y * CellSize * 0.5;
 	const double Thickness = 20.0;
 
-	// Measured against the height the body is currently drawn at, so the door goes down with
-	// the block when it flattens instead of floating above the slab.
-	// --- CUTAWAY DISABLED 2026-09-04: was GetVisualHeight() ---
+	// 몸체가 지금 그려지는 높이를 기준으로 재므로, 블록이 납작해질 때 문도 슬랩 위에
+	// 떠 있지 않고 같이 내려간다.
+	// --- CUTAWAY DISABLED 2026-09-04: 원래는 GetVisualHeight() ---
 	const double VisualHeight = Height;
 
-	// Pushed a half thickness further out so the slab stands proud of the body rather than
-	// half sunk into it, where it would read as a seam.
+	// 두께의 절반만큼 더 밖으로 밀어, 슬랩이 몸체에 반쯤 박혀 이음매처럼 보이지 않고
+	// 몸체보다 도드라지게 한다.
 	const FIntPoint Offset = LTTSGrid::DirOffset(DoorDirection);
 	const FVector Location(
 		Offset.X * (HalfX + Thickness * 0.5),
@@ -91,8 +91,8 @@ void APuzzleElevatorBlock::RefreshVisual()
 
 void APuzzleElevatorBlock::OnConstruction(const FTransform& Transform)
 {
-	// Keep the authored footprint square whatever someone types in: a rectangular elevator
-	// would change the cells it covers on every turn, which the rotation rules do not allow.
+	// 누가 무엇을 입력하든 지정된 풋프린트를 정사각형으로 유지한다: 직사각형 엘리베이터는
+	// 돌 때마다 덮는 셀이 바뀌는데, 회전 규칙은 그것을 허용하지 않는다.
 	FootprintSize = FIntPoint(4, 4);
 
 	Super::OnConstruction(Transform);
@@ -104,7 +104,7 @@ void APuzzleElevatorBlock::GetDoorFrontCells(TArray<FIntPoint>& OutCells) const
 	const FIntPoint Step = LTTSGrid::DirOffset(Door);
 	const FGridRect Rect = GetRect();
 
-	// Walk the door-facing edge of the footprint and step one cell out from each.
+	// 풋프린트에서 문이 향한 모서리를 따라가며 각 셀에서 한 칸 바깥으로 나간다.
 	if (Step.X != 0)
 	{
 		const int32 EdgeX = (Step.X > 0) ? Rect.MaxInclusive().X : Rect.Min.X;
@@ -192,8 +192,8 @@ bool APuzzleElevatorBlock::CanEditChange(const FProperty* InProperty) const
 		return true;
 	}
 
-	// All three are fixed by what an elevator is: 4x4, travelling along its door, and moved
-	// one cell per drag so a ride is a deliberate sequence of moves rather than one sweep.
+	// 셋 다 엘리베이터의 정의상 고정이다: 4x4이고, 문 방향으로 이동하며, 한 번 타는 게
+	// 한 번의 스윕이 아니라 의도적인 이동의 연속이 되도록 드래그당 한 셀씩 움직인다.
 	const FName Name = InProperty->GetFName();
 	return Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, FootprintSize)
 		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, MoveAxis)

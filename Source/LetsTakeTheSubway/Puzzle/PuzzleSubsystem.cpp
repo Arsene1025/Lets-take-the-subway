@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Puzzle/PuzzleSubsystem.h"
 
@@ -22,12 +22,12 @@ UPuzzleSubsystem* UPuzzleSubsystem::Get(const UObject* WorldContext)
 
 bool UPuzzleSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
 {
-	// Editor worlds have no gameplay, and the editor preview of a block is driven entirely
-	// by its own construction script.
+	// 에디터 월드에는 게임플레이가 없고, 에디터에서 보이는 블록의 미리보기는 전부 블록
+	// 자신의 컨스트럭션 스크립트가 담당한다.
 	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE;
 }
 
-// ---------------------------------------------------------------------------- Registries
+// ---------------------------------------------------------------------------- 등록부
 
 void UPuzzleSubsystem::RegisterBlock(APuzzleBlock* Block)
 {
@@ -93,7 +93,7 @@ void UPuzzleSubsystem::UnregisterLever(APuzzleLever* Lever)
 	});
 }
 
-// ---------------------------------------------------------------------------- Queries
+// ---------------------------------------------------------------------------- 조회
 
 bool UPuzzleSubsystem::IsInputLocked() const
 {
@@ -181,9 +181,9 @@ void UPuzzleSubsystem::UpdateOcclusion(const FVector& CameraLocation, const APaw
 
 	if (Pawn)
 	{
-		// Tested against each block's authored volume rather than by tracing its collision.
-		// A physics sweep would read the flattened mesh, so a block that ducked out of the
-		// way would immediately stop occluding, stand up, and occlude again every frame.
+		// 콜리전을 트레이스하는 대신 각 블록의 지정된 부피와 검사한다. 물리 스윕은
+		// 납작해진 메시를 읽으므로, 비켜 준 블록이 곧바로 가림을 멈추고, 일어서고,
+		// 다시 가리기를 매 프레임 반복하게 된다.
 		const FVector PawnLocation = Pawn->GetActorLocation();
 		const FVector Extent(FMath::Max(SweepRadius, 1.0f));
 
@@ -213,7 +213,7 @@ void UPuzzleSubsystem::UpdateOcclusion(const FVector& CameraLocation, const APaw
 
 	NumOccludingBlocks = Blocking.Num();
 
-	// Every block is told either way, so one that stopped blocking stands back up.
+	// 모든 블록에 어느 쪽이든 알려 주므로, 더 이상 가리지 않는 블록은 다시 일어선다.
 	for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
 	{
 		if (APuzzleBlock* Block = Entry.Get())
@@ -261,7 +261,7 @@ void UPuzzleSubsystem::ShowFeedback(const FString& Message, const FLinearColor& 
 	}
 }
 
-// ---------------------------------------------------------------------------- Rules
+// ---------------------------------------------------------------------------- 규칙
 
 void UPuzzleSubsystem::NotifyBlockCameToRest(APuzzleBlock* Block)
 {
@@ -278,7 +278,7 @@ void UPuzzleSubsystem::NotifyBlockCameToRest(APuzzleBlock* Block)
 			continue;
 		}
 
-		// Tiles never overlap, so at most one can hold the block; stop at the first.
+		// 타일은 절대 겹치지 않으므로 블록을 담는 타일은 많아야 하나다. 첫 번째에서 멈춘다.
 		FText Reason;
 		if (!Tile->TryRotate(&Reason))
 		{

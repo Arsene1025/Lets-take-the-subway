@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Player/GridPawn.h"
 
@@ -31,7 +31,7 @@ AGridPawn::AGridPawn()
 	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BodyMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BodyMesh->SetGenerateOverlapEvents(false);
-	// The engine sphere is 100 cm across, so the scale is the radius in metres.
+	// 엔진 구체는 지름 100 cm이므로 스케일 값이 곧 미터 단위 반지름이다.
 	BodyMesh->SetRelativeScale3D(FVector(BallRadius / 50.0f));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
@@ -54,7 +54,7 @@ AGridPawn::AGridPawn()
 	SpringArm->bInheritPitch = false;
 	SpringArm->bInheritYaw = false;
 	SpringArm->bInheritRoll = false;
-	// Absolute rotation keeps the isometric framing fixed no matter how the pawn is turned.
+	// 절대 회전을 쓰면 폰이 어느 쪽으로 돌든 아이소메트릭 구도가 고정된다.
 	SpringArm->SetUsingAbsoluteRotation(true);
 	SpringArm->SetRelativeRotation(CameraRotation);
 
@@ -73,8 +73,8 @@ void AGridPawn::BeginPlay()
 		SpringArm->SetWorldRotation(CameraRotation);
 	}
 
-	// Designers may tune the radius on an instance; keep the collision-less bounds and the
-	// visible ball in step with it.
+	// 디자이너가 인스턴스에서 반지름을 조정할 수 있으니, 콜리전 없는 바운드와 보이는
+	// 공을 그 값에 맞춰 둔다.
 	if (Sphere)
 	{
 		Sphere->SetSphereRadius(BallRadius);
@@ -144,7 +144,7 @@ void AGridPawn::RollBody(const FVector& Delta)
 		return;
 	}
 
-	// Only the horizontal travel rolls the ball; the vertical part of a stair step does not.
+	// 수평 이동만 공을 굴린다; 계단 스텝의 수직 성분은 굴리지 않는다.
 	const FVector Flat(Delta.X, Delta.Y, 0.0);
 	const double Distance = Flat.Size();
 	if (Distance <= KINDA_SMALL_NUMBER)
@@ -152,7 +152,7 @@ void AGridPawn::RollBody(const FVector& Delta)
 		return;
 	}
 
-	// A ball rolling along D spins about the axis Up x D, by arc length / radius.
+	// D 방향으로 구르는 공은 Up x D 축을 중심으로 호 길이 / 반지름만큼 회전한다.
 	const FVector Axis = FVector::CrossProduct(FVector::UpVector, Flat / Distance);
 	const double AngleRad = Distance / BallRadius;
 	BodyMesh->AddWorldRotation(FQuat(Axis, AngleRad));
@@ -185,8 +185,8 @@ void AGridPawn::RequestMoveToCell(FIntPoint Goal)
 
 	if (IsMoving())
 	{
-		// Re-planning from a position between two cells would be ambiguous, so remember the
-		// click and act on it as soon as the pawn is cell-aligned again.
+		// 두 셀 사이 위치에서 재계획하면 모호하므로, 클릭을 기억해 뒀다가 폰이 다시
+		// 셀에 정렬되는 즉시 처리한다.
 		PendingGoal = Goal;
 		return;
 	}
@@ -276,8 +276,8 @@ void AGridPawn::Tick(float DeltaSeconds)
 
 	const FIntPoint NextCell = Path[0];
 
-	// A Conditional rule can change between planning and arriving, so the next cell is
-	// re-checked every time the pawn is about to enter it.
+	// Conditional 룰은 계획 시점과 도착 시점 사이에 바뀔 수 있으므로, 폰이 다음 셀에
+	// 들어가기 직전마다 다시 검사한다.
 	FText DeniedMessage;
 	if (!Grid->CanPawnEnter(NextCell, this, &DeniedMessage))
 	{
