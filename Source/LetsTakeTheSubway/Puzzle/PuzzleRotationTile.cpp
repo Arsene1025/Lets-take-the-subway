@@ -256,6 +256,40 @@ bool APuzzleRotationTile::TryRotate(FText* OutReason)
 		return false;
 	}
 
+	// Anything else standing on a destination cell stops the turn. The blocks above are all
+	// accounted for, so what this catches is a piece the tile does not carry: a lever, or a
+	// rotating obstacle overlapping the tile. Those are not in the block registry, and
+	// without this check the tile would quietly turn a block into one of them.
+	{
+		TSet<const AActor*> Participants;
+		Participants.Reserve(Inside.Num());
+		for (const APuzzleBlock* Block : Inside)
+		{
+			Participants.Add(Block);
+		}
+
+		for (const FGridRect& Destination : Destinations)
+		{
+			TArray<FIntPoint> Cells;
+			Destination.GatherCells(Cells);
+
+			for (const FIntPoint& Cell : Cells)
+			{
+				const AActor* Occupant = Grid->GetOccupant(Cell);
+				if (Occupant && !Participants.Contains(Occupant))
+				{
+					if (OutReason)
+					{
+						*OutReason = FText::Format(
+							NSLOCTEXT("LTTSPuzzle", "TileBlockedByObject", "Cannot rotate: {0} is in the way."),
+							FText::FromString(Occupant->GetName()));
+					}
+					return false;
+				}
+			}
+		}
+	}
+
 	// The pawn is part of the space too. It is stopped first, because a pawn caught between
 	// two cells has no single cell to carry around the pivot.
 	AGridPawn* Pawn = Subsystem->GetGridPawn();

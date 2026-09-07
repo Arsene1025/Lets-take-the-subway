@@ -192,10 +192,12 @@ bool APuzzleElevatorBlock::CanEditChange(const FProperty* InProperty) const
 		return true;
 	}
 
-	// Both are fixed by what an elevator is: 4x4, and travelling along its door.
+	// All three are fixed by what an elevator is: 4x4, travelling along its door, and moved
+	// one cell per drag so a ride is a deliberate sequence of moves rather than one sweep.
 	const FName Name = InProperty->GetFName();
 	return Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, FootprintSize)
-		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, MoveAxis);
+		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, MoveAxis)
+		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, bOneStepPerDrag);
 }
 
 #endif

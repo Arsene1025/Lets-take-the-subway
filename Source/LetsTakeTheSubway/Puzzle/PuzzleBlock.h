@@ -10,6 +10,7 @@
 #include "PuzzleBlock.generated.h"
 
 class AGridActor;
+class UPuzzleSubsystem;
 class UStaticMeshComponent;
 
 /**
@@ -67,6 +68,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 1.0))
 	float SlideSpeed = 600.0f;
 
+	/**
+	 * Stop after one cell and wait for the player to let go and take hold again.
+	 *
+	 * On by default: the design asks for one drag to mean one step for every pushable piece,
+	 * so a puzzle is solved in countable moves rather than by sweeping the cursor across the
+	 * platform. Turning it off restores the older free-running drag, which the corner-turning
+	 * behaviour in the drag code was written for and which is still useful for testing.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
+	bool bOneStepPerDrag = true;
+
 	// --- CUTAWAY DISABLED 2026-09-04 -------------------------------------------------
 	// Flattening a block that hides the pawn is switched off for now. The code is kept
 	// rather than deleted so it can be turned back on: search for this marker, restore
@@ -94,6 +106,15 @@ public:
 	FIntPoint GetWorldFootprint() const;
 
 	FGridRect GetRect() const { return FGridRect(MinCell, GetWorldFootprint()); }
+
+	/**
+	 * The cells this block claims on the grid.
+	 *
+	 * The whole footprint for an ordinary block. Virtual because a piece can be a rectangle
+	 * with a hole in it: the rotating obstacle leaves its channel open so blocks and the
+	 * pawn can stand inside it.
+	 */
+	virtual void GatherOccupiedCells(TArray<FIntPoint>& OutCells) const;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
@@ -177,6 +198,17 @@ protected:
 	/** Resize and recolour the body. Called whenever the footprint or height changes. */
 	virtual void RefreshVisual();
 
+	/**
+	 * Join the subsystem's registry. Overridden so a piece can land in a different list:
+	 * the rotating obstacle must not appear among the pushable blocks, or the drag code
+	 * would try to shove it and the rotation tile would treat it as a stray piece.
+	 */
+	virtual void RegisterWithSubsystem(UPuzzleSubsystem& Subsystem);
+	virtual void UnregisterFromSubsystem(UPuzzleSubsystem& Subsystem);
+
+	/** Claim the current cells on the grid, releasing whatever was held before. */
+	void ClaimCells();
+
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Block")
 	TObjectPtr<USceneComponent> SceneRoot;
 
@@ -192,9 +224,6 @@ protected:
 	TObjectPtr<AGridActor> Grid;
 
 private:
-	/** Claim the current rectangle on the grid, releasing whatever was held before. */
-	void ClaimCells();
-
 	/** Move the actor onto the exact centre of its current rectangle. */
 	void SnapToRect();
 
