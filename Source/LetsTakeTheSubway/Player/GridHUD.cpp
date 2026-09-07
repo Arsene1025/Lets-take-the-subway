@@ -83,8 +83,8 @@ void AGridHUD::DrawHUD()
 
 	if (const UPuzzleSubsystem* Puzzle = UPuzzleSubsystem::Get(this))
 	{
-		FString Status = FString::Printf(TEXT("Blocks %d   occupied cells %d"),
-			Puzzle->GetNumBlocks(), Grid ? Grid->GetNumOccupiedCells() : 0);
+		FString Status = FString::Printf(TEXT("Blocks %d   obstacles %d   occupied cells %d"),
+			Puzzle->GetNumBlocks(), Puzzle->GetNumObstacles(), Grid ? Grid->GetNumOccupiedCells() : 0);
 
 		// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
@@ -98,7 +98,7 @@ void AGridHUD::DrawHUD()
 		{
 			Status += TEXT("   [pieces moving]");
 		}
-		else if (GridController && GridController->IsDraggingBlock())
+		else if (GridController && (GridController->IsDraggingBlock() || GridController->IsDraggingLever()))
 		{
 			Status += TEXT("   ") + GridController->GetDragStatusText();
 		}

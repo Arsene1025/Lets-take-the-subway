@@ -68,6 +68,11 @@ EPuzzleMoveAxis APuzzleBlock::GetWorldMoveAxis() const
 	return LTTSPuzzle::RotateAxis(MoveAxis, QuarterTurns);
 }
 
+void APuzzleBlock::GatherOccupiedCells(TArray<FIntPoint>& OutCells) const
+{
+	GetRect().GatherCells(OutCells);
+}
+
 // --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
 FBox APuzzleBlock::GetFullBounds() const
@@ -142,11 +147,21 @@ void APuzzleBlock::ClaimCells()
 	Grid->ClearAllOccupantsOf(this);
 
 	TArray<FIntPoint> Cells;
-	GetRect().GatherCells(Cells);
+	GatherOccupiedCells(Cells);
 	for (const FIntPoint& Cell : Cells)
 	{
 		Grid->SetOccupant(Cell, this);
 	}
+}
+
+void APuzzleBlock::RegisterWithSubsystem(UPuzzleSubsystem& Subsystem)
+{
+	Subsystem.RegisterBlock(this);
+}
+
+void APuzzleBlock::UnregisterFromSubsystem(UPuzzleSubsystem& Subsystem)
+{
+	Subsystem.UnregisterBlock(this);
 }
 
 void APuzzleBlock::SnapToRect()
@@ -185,7 +200,7 @@ void APuzzleBlock::BeginPlay()
 	// Report rather than correct: a block hanging off the platform or overlapping another is
 	// a level bug, and quietly nudging it would hide which cells the designer meant.
 	TArray<FIntPoint> Cells;
-	GetRect().GatherCells(Cells);
+	GatherOccupiedCells(Cells);
 	for (const FIntPoint& Cell : Cells)
 	{
 		if (!Grid->IsValidCell(Cell) || !Grid->IsCellWalkableStatic(Cell))
@@ -207,7 +222,7 @@ void APuzzleBlock::BeginPlay()
 
 	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
 	{
-		Subsystem->RegisterBlock(this);
+		RegisterWithSubsystem(*Subsystem);
 	}
 
 	UE_LOG(LogLTTSGrid, Display,
@@ -224,7 +239,7 @@ void APuzzleBlock::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
 	{
-		Subsystem->UnregisterBlock(this);
+		UnregisterFromSubsystem(*Subsystem);
 	}
 
 	Super::EndPlay(EndPlayReason);

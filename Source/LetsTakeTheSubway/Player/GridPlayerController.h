@@ -10,6 +10,7 @@
 class AGridActor;
 class AGridPawn;
 class APuzzleBlock;
+class APuzzleLever;
 class UInputAction;
 class UInputMappingContext;
 
@@ -20,17 +21,20 @@ struct FCursorPick
 	{
 		None,
 		Floor,
-		Block
+		Block,
+		Lever
 	};
 
 	EKind Kind = EKind::None;
 
-	/** Floor: the cell to walk to. Block: the cell the cursor landed on. */
+	/** Floor: the cell to walk to. Block or lever: the cell the cursor landed on. */
 	FIntPoint Cell = FIntPoint::ZeroValue;
 
 	TWeakObjectPtr<APuzzleBlock> Block;
 
-	/** Where the ray met the block. Becomes the grab point. */
+	TWeakObjectPtr<APuzzleLever> Lever;
+
+	/** Where the ray met the piece. Becomes the grab point. */
 	FVector HitLocation = FVector::ZeroVector;
 };
 
@@ -74,6 +78,8 @@ public:
 
 	bool IsDraggingBlock() const { return DraggedBlock.IsValid(); }
 
+	bool IsDraggingLever() const { return DraggedLever.IsValid(); }
+
 	/** One line describing what the cursor is holding, for the debug overlay. */
 	FString GetDragStatusText() const;
 
@@ -86,6 +92,12 @@ private:
 
 	/** Let go of the held block, resolving a press that never moved it as a click. */
 	void FinishDrag();
+
+	/** Track how far the cursor has been swung around the held wheel, and fire one turn. */
+	void UpdateLeverDrag();
+
+	/** Let go of the wheel and spring it back. */
+	void FinishLeverDrag();
 
 	/** Redraw the hover overlay for whatever the cursor is over. */
 	void UpdateHover();
@@ -133,4 +145,23 @@ private:
 
 	/** Zero at release means the press was a click on the block, not a push. */
 	int32 StepsThisDrag = 0;
+
+	// ---------------------------------------------------------------- Lever drag
+	//
+	// A wheel is turned rather than pushed, so the gesture is measured as an angle swept
+	// about the wheel's position on screen instead of a distance across the floor.
+
+	TWeakObjectPtr<APuzzleLever> DraggedLever;
+
+	/** The wheel's position on screen. The drag angle is measured about this point. */
+	FVector2D LeverScreenCentre = FVector2D::ZeroVector;
+
+	/** Cursor angle about the wheel last frame, in degrees. */
+	double LeverLastAngle = 0.0;
+
+	/** Total angle swept since the wheel was taken hold of. Signed; anticlockwise is positive. */
+	double LeverSweptAngle = 0.0;
+
+	/** One drag is one quarter turn, so the wheel stops answering once it has fired. */
+	bool bLeverTurnSpent = false;
 };

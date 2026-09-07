@@ -10,6 +10,8 @@ class AGridActor;
 class AGridPawn;
 class AGridPlayerController;
 class APuzzleBlock;
+class APuzzleLever;
+class APuzzleRotatingObstacle;
 class APuzzleRotationTile;
 
 /**
@@ -41,9 +43,26 @@ public:
 	void RegisterTile(APuzzleRotationTile* Tile);
 	void UnregisterTile(APuzzleRotationTile* Tile);
 
+	/**
+	 * Rotating obstacles are kept apart from the pushable blocks.
+	 *
+	 * They derive from the same class, but nothing that treats a block as something to shove
+	 * around should ever pick one up: not the drag code, not a rotation tile deciding what is
+	 * standing on it, and not an obstacle looking for passengers.
+	 */
+	void RegisterObstacle(APuzzleRotatingObstacle* Obstacle);
+	void UnregisterObstacle(APuzzleRotatingObstacle* Obstacle);
+
+	void RegisterLever(APuzzleLever* Lever);
+	void UnregisterLever(APuzzleLever* Lever);
+
 	const TArray<TWeakObjectPtr<APuzzleBlock>>& GetBlocks() const { return Blocks; }
 
+	const TArray<TWeakObjectPtr<APuzzleRotatingObstacle>>& GetObstacles() const { return Obstacles; }
+
 	int32 GetNumBlocks() const { return Blocks.Num(); }
+
+	int32 GetNumObstacles() const { return Obstacles.Num(); }
 
 	/**
 	 * True while anything is mid-animation.
@@ -56,7 +75,13 @@ public:
 
 	APuzzleBlock* FindBlockAtCell(const AGridActor& Grid, FIntPoint Cell) const;
 
-	/** Every live block as a plain actor, for a trace that needs to see past all of them. */
+	/**
+	 * Every piece the cursor can hit, as plain actors, for a trace that needs to see past all
+	 * of them to the floor behind.
+	 *
+	 * Obstacles and levers are included as well as blocks. The camera looks down steeply, so
+	 * anything standing up hides floor cells behind it, and those cells must stay clickable.
+	 */
 	void GetBlockActors(TArray<AActor*>& OutActors) const;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
@@ -91,6 +116,8 @@ public:
 private:
 	TArray<TWeakObjectPtr<APuzzleBlock>> Blocks;
 	TArray<TWeakObjectPtr<APuzzleRotationTile>> Tiles;
+	TArray<TWeakObjectPtr<APuzzleRotatingObstacle>> Obstacles;
+	TArray<TWeakObjectPtr<APuzzleLever>> Levers;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0

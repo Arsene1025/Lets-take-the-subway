@@ -8,6 +8,8 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleElevatorBlock.h"
+#include "Puzzle/PuzzleLever.h"
+#include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
 
 #include "Camera/PlayerCameraManager.h"
@@ -148,6 +150,17 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 	FHitResult Hit;
 	if (GetWorld()->LineTraceSingleByChannel(Hit, WorldOrigin, RayEnd, Grid->TraceChannel, Params))
 	{
+		// A lever is one cell across and taller than it is wide, so there is no floor hiding
+		// behind it worth protecting: any face of it grabs.
+		if (APuzzleLever* Lever = Cast<APuzzleLever>(Hit.GetActor()))
+		{
+			Pick.Kind = FCursorPick::EKind::Lever;
+			Pick.Lever = Lever;
+			Pick.Cell = Lever->GetCell();
+			Pick.HitLocation = Hit.Location;
+			return Pick;
+		}
+
 		// Only the top face grabs. A block's sides face the camera and stand in front of the
 		// floor behind them, so treating a side hit as a grab would make those cells
 		// unreachable by clicking.
@@ -214,6 +227,48 @@ void AGridPlayerController::OnPressed()
 
 	const FCursorPick Pick = PickUnderCursor();
 
+	if (Pick.Kind == FCursorPick::EKind::Lever)
+	{
+		APuzzleLever* Lever = Pick.Lever.Get();
+		if (!Lever)
+		{
+			return;
+		}
+
+		// Refused at the moment of the press rather than at the end of the drag, so the
+		// player is told to walk over before they have spent a gesture on it.
+		if (!Lever->IsPawnAdjacent(GridPawn))
+		{
+			ShowFeedback(TEXT("Stand next to the lever to work it."), FLinearColor(1.0f, 0.65f, 0.05f));
+			return;
+		}
+
+		FVector2D ScreenCentre;
+		if (!ProjectWorldLocationToScreen(Lever->GetWheelWorldLocation(), ScreenCentre))
+		{
+			return;
+		}
+
+		FVector2D MousePosition;
+		if (!GetMousePosition(MousePosition.X, MousePosition.Y))
+		{
+			return;
+		}
+
+		DraggedLever = Lever;
+		LeverScreenCentre = ScreenCentre;
+
+		// Screen Y grows downwards, so it is negated to make the measured angle read the way
+		// the player sees it: increasing anticlockwise.
+		LeverLastAngle = FMath::RadiansToDegrees(FMath::Atan2(
+			-(MousePosition.Y - ScreenCentre.Y), MousePosition.X - ScreenCentre.X));
+		LeverSweptAngle = 0.0;
+		bLeverTurnSpent = false;
+
+		ShowFeedback(TEXT("Turn the wheel."), FLinearColor::White);
+		return;
+	}
+
 	if (Pick.Kind == FCursorPick::EKind::Block)
 	{
 		APuzzleBlock* Block = Pick.Block.Get();
@@ -245,7 +300,99 @@ void AGridPlayerController::OnPressed()
 
 void AGridPlayerController::OnReleased()
 {
+	FinishLeverDrag();
 	FinishDrag();
+}
+
+// ---------------------------------------------------------------------------- Lever drag
+
+void AGridPlayerController::UpdateLeverDrag()
+{
+	APuzzleLever* Lever = DraggedLever.Get();
+	if (!Lever)
+	{
+		FinishLeverDrag();
+		return;
+	}
+
+	// The release event is lost when the cursor leaves the viewport with the button down.
+	if (!IsInputKeyDown(EKeys::LeftMouseButton))
+	{
+		FinishLeverDrag();
+		return;
+	}
+
+	FVector2D MousePosition;
+	if (!GetMousePosition(MousePosition.X, MousePosition.Y))
+	{
+		return;
+	}
+
+	const FVector2D Offset(MousePosition.X - LeverScreenCentre.X, MousePosition.Y - LeverScreenCentre.Y);
+
+	// Right on top of the wheel the angle is meaningless and jitters wildly, so wait until
+	// the cursor is far enough out to have a direction worth reading.
+	constexpr double MinRadiusPixels = 12.0;
+	if (Offset.Size() < MinRadiusPixels)
+	{
+		return;
+	}
+
+	const double Angle = FMath::RadiansToDegrees(FMath::Atan2(-Offset.Y, Offset.X));
+
+	// Accumulated as frame-to-frame deltas, so a swing past the wrap-around point keeps
+	// counting instead of jumping the full way back.
+	LeverSweptAngle += FMath::FindDeltaAngleDegrees(LeverLastAngle, Angle);
+	LeverLastAngle = Angle;
+
+	// The wheel follows the cursor whichever way it is going. Screen-clockwise is a negative
+	// swept angle and a positive yaw in the world, hence the sign flip.
+	Lever->SetWheelPreviewAngle(static_cast<float>(-LeverSweptAngle));
+
+	if (bLeverTurnSpent)
+	{
+		return;		// one drag, one quarter turn: let go and take hold again for another
+	}
+
+	if (FMath::Abs(LeverSweptAngle) < Lever->TurnThresholdDegrees)
+	{
+		return;
+	}
+
+	bLeverTurnSpent = true;
+
+	// The camera looks along a yaw of 45 degrees, under which a positive world yaw reads as
+	// clockwise on screen. Swinging the cursor clockwise therefore asks for a positive turn.
+	const int32 TurnSign = (LeverSweptAngle < 0.0) ? 1 : -1;
+
+	FText Reason;
+	if (!Lever->TryTurn(TurnSign, GetGridPawn(), &Reason))
+	{
+		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+	}
+}
+
+void AGridPlayerController::FinishLeverDrag()
+{
+	APuzzleLever* Lever = DraggedLever.Get();
+	DraggedLever.Reset();
+
+	if (!Lever)
+	{
+		return;
+	}
+
+	// The wheel springs back rather than staying where it was left: it is a control, and its
+	// resting angle carries no meaning about the structure it turns.
+	Lever->SetWheelPreviewAngle(0.0f);
+
+	if (!bLeverTurnSpent)
+	{
+		ShowFeedback(TEXT("Drag around the wheel to turn it a quarter."), FLinearColor::White);
+	}
+
+	LeverSweptAngle = 0.0;
+	bLeverTurnSpent = false;
 }
 
 void AGridPlayerController::UpdateDrag()
@@ -270,6 +417,13 @@ void AGridPlayerController::UpdateDrag()
 	if (Block->IsAnimating())
 	{
 		return;		// one cell at a time; wait for the step to land
+	}
+
+	// One drag is one move. The block stays held so the release still reads as a drag rather
+	// than a click, but nothing more is attempted until the player lets go and grabs again.
+	if (Block->bOneStepPerDrag && StepsThisDrag >= 1)
+	{
+		return;
 	}
 
 	if (DragAxis == EPuzzleMoveAxis::None)
@@ -376,6 +530,12 @@ void AGridPlayerController::FinishDrag()
 	}
 
 	// A press that moved nothing is a click on the piece.
+	if (Block->IsA<APuzzleRotatingObstacle>())
+	{
+		ShowFeedback(TEXT("This turns only when its lever is turned."), FLinearColor::White);
+		return;
+	}
+
 	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
 	{
 		FText Reason;
@@ -401,6 +561,12 @@ void AGridPlayerController::FinishDrag()
 
 FString AGridPlayerController::GetDragStatusText() const
 {
+	if (const APuzzleLever* Lever = DraggedLever.Get())
+	{
+		return FString::Printf(TEXT("Turning %s (%.0f deg%s)"),
+			*Lever->GetName(), LeverSweptAngle, bLeverTurnSpent ? TEXT(", spent") : TEXT(""));
+	}
+
 	const APuzzleBlock* Block = DraggedBlock.Get();
 	if (!Block)
 	{
@@ -428,6 +594,11 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 		Subsystem->UpdateOcclusion(CameraLocation, GridPawn, SweepRadius);
 	}
 #endif
+
+	if (DraggedLever.IsValid())
+	{
+		UpdateLeverDrag();
+	}
 
 	if (DraggedBlock.IsValid())
 	{
@@ -475,14 +646,25 @@ void AGridPlayerController::UpdateHover()
 		return;
 	}
 
-	if (Pick.Kind == FCursorPick::EKind::Block)
+	if (Pick.Kind == FCursorPick::EKind::Lever)
+	{
+		if (const APuzzleLever* Lever = Pick.Lever.Get())
+		{
+			// The cells it can be worked from, not the lever's own cell: where to stand is
+			// the one thing the player needs to know before reaching for it.
+			TArray<FIntPoint> Cells;
+			Lever->GetOperatingCells(Cells);
+			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
+		}
+	}
+	else if (Pick.Kind == FCursorPick::EKind::Block)
 	{
 		if (const APuzzleBlock* Block = Pick.Block.Get())
 		{
 			// The whole footprint, so the player can see what they are about to take hold of
 			// rather than the single cell the ray happened to land in.
 			TArray<FIntPoint> Cells;
-			Block->GetRect().GatherCells(Cells);
+			Block->GatherOccupiedCells(Cells);
 			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
 		}
 	}

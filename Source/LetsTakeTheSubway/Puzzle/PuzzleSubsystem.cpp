@@ -7,6 +7,8 @@
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
 #include "Puzzle/PuzzleBlock.h"
+#include "Puzzle/PuzzleLever.h"
+#include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleRotationTile.h"
 
 #include "Engine/World.h"
@@ -59,6 +61,38 @@ void UPuzzleSubsystem::UnregisterTile(APuzzleRotationTile* Tile)
 	});
 }
 
+void UPuzzleSubsystem::RegisterObstacle(APuzzleRotatingObstacle* Obstacle)
+{
+	if (Obstacle)
+	{
+		Obstacles.AddUnique(Obstacle);
+	}
+}
+
+void UPuzzleSubsystem::UnregisterObstacle(APuzzleRotatingObstacle* Obstacle)
+{
+	Obstacles.RemoveAll([Obstacle](const TWeakObjectPtr<APuzzleRotatingObstacle>& Entry)
+	{
+		return !Entry.IsValid() || Entry.Get() == Obstacle;
+	});
+}
+
+void UPuzzleSubsystem::RegisterLever(APuzzleLever* Lever)
+{
+	if (Lever)
+	{
+		Levers.AddUnique(Lever);
+	}
+}
+
+void UPuzzleSubsystem::UnregisterLever(APuzzleLever* Lever)
+{
+	Levers.RemoveAll([Lever](const TWeakObjectPtr<APuzzleLever>& Entry)
+	{
+		return !Entry.IsValid() || Entry.Get() == Lever;
+	});
+}
+
 // ---------------------------------------------------------------------------- Queries
 
 bool UPuzzleSubsystem::IsInputLocked() const
@@ -85,6 +119,17 @@ bool UPuzzleSubsystem::IsInputLocked() const
 		}
 	}
 
+	for (const TWeakObjectPtr<APuzzleRotatingObstacle>& Entry : Obstacles)
+	{
+		if (const APuzzleRotatingObstacle* Obstacle = Entry.Get())
+		{
+			if (Obstacle->IsAnimating())
+			{
+				return true;
+			}
+		}
+	}
+
 	return false;
 }
 
@@ -95,12 +140,29 @@ APuzzleBlock* UPuzzleSubsystem::FindBlockAtCell(const AGridActor& Grid, FIntPoin
 
 void UPuzzleSubsystem::GetBlockActors(TArray<AActor*>& OutActors) const
 {
-	OutActors.Reserve(OutActors.Num() + Blocks.Num());
+	OutActors.Reserve(OutActors.Num() + Blocks.Num() + Obstacles.Num() + Levers.Num());
+
 	for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
 	{
 		if (APuzzleBlock* Block = Entry.Get())
 		{
 			OutActors.Add(Block);
+		}
+	}
+
+	for (const TWeakObjectPtr<APuzzleRotatingObstacle>& Entry : Obstacles)
+	{
+		if (APuzzleRotatingObstacle* Obstacle = Entry.Get())
+		{
+			OutActors.Add(Obstacle);
+		}
+	}
+
+	for (const TWeakObjectPtr<APuzzleLever>& Entry : Levers)
+	{
+		if (APuzzleLever* Lever = Entry.Get())
+		{
+			OutActors.Add(Lever);
 		}
 	}
 }
