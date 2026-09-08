@@ -110,3 +110,6 @@ ModelContextProtocol.GenerateClientConfig ClaudeCode
 - GameMode, 캐릭터, 입력 매핑, 레벨 등 게임 구현 일체
 - GitHub CODEOWNERS 및 브랜치 보호 규칙 (팀원 계정 확정 후 설정)
 - 원격 저장소의 Git LFS 활성화 및 스토리지 할당량 확인
+
+
+아트 브랜치 병합 테스트 1 0908
