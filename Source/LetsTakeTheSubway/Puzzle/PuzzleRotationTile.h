@@ -3,11 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "Grid/GridFootprint.h"
+#include "Puzzle/PuzzleFloorTile.h"
 #include "PuzzleRotationTile.generated.h"
 
-class AGridActor;
 class APuzzleBlock;
 class UStaticMeshComponent;
 
@@ -23,16 +21,12 @@ class UStaticMeshComponent;
  * 아예 거부하고 플레이어에게 이유를 알려준다.
  */
 UCLASS(HideCategories = (Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, Replication))
-class LETSTAKETHESUBWAY_API APuzzleRotationTile : public AActor
+class LETSTAKETHESUBWAY_API APuzzleRotationTile : public APuzzleFloorTile
 {
 	GENERATED_BODY()
 
 public:
 	APuzzleRotationTile();
-
-	/** 한 변의 길이(셀 단위). 직사각형은 한 번 돌고 나면 자기 내용물을 담을 수 없으므로 정사각형이다. */
-	UPROPERTY(EditAnywhere, Category = "Rotation Tile", meta = (ClampMin = 2, ClampMax = 16))
-	int32 SizeInCells = 4;
 
 	/** 위에서 본 회전 방향. 시계 방향이 디자인 문서의 도해와 일치한다. */
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile")
@@ -41,15 +35,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile", meta = (ClampMin = 0.05))
 	float RotateDuration = 0.4f;
 
-	FGridRect GetRegion() const { return Region; }
-
 	bool IsRotating() const { return bRotating; }
-
-	/** 블록의 모든 셀이 영역 안에 들어 있으면(완전히 포함하면) true. */
-	bool FullyContains(const APuzzleBlock& Block) const;
-
-	/** 블록이 영역 일부를 덮지만 가장자리 밖으로 삐져나와 있으면(걸침) true. */
-	bool Straddles(const APuzzleBlock& Block) const;
 
 	/**
 	 * 공간을 돌리거나, 왜 돌릴 수 없는지 이유를 알려준다.
@@ -59,39 +45,23 @@ public:
 	 */
 	bool TryRotate(FText* OutReason = nullptr);
 
-	virtual void OnConstruction(const FTransform& Transform) override;
-	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual bool IsBusy() const override { return bRotating; }
+
+	/** 블록이 타일 안에서 멈췄다. 회전판의 반응은 공간을 돌리는 것이다. */
+	virtual void OnBlockCameToRest(APuzzleBlock& Block) override;
+
 	virtual void Tick(float DeltaSeconds) override;
 
-#if WITH_EDITOR
-	virtual void PostEditMove(bool bFinished) override;
-	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
+protected:
+	virtual void RefreshVisual() override;
+	virtual FString DescribeTile() const override;
 
 private:
-	void RefreshVisual();
-
-	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
-	TObjectPtr<USceneComponent> SceneRoot;
-
-	/** 영역을 표시하는 평평한 패드. 클릭 트레이스와 바닥 트레이스가 통과하도록 콜리전이 없다. */
-	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
-	TObjectPtr<UStaticMeshComponent> PadMesh;
-
 	/** 한쪽 모서리에 놓여, 레벨에서 회전 방향이 한눈에 읽히게 한다. */
 	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
 	TObjectPtr<UStaticMeshComponent> CornerMesh;
 
-	UPROPERTY(Transient)
-	TObjectPtr<AGridActor> Grid;
-
-	FGridRect Region;
-
-	FVector PivotWorld = FVector::ZeroVector;
-
 	bool bRotating = false;
-	bool bDisabled = false;
 	float RotationElapsed = 0.0f;
 
 	/** 폰이 최종적으로 놓일 셀. 회전이 끝난 뒤 적용해 폰이 공간과 함께 이동하게 한다. */

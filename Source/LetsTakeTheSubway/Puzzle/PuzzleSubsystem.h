@@ -9,10 +9,16 @@
 class AGridActor;
 class AGridPawn;
 class AGridPlayerController;
+class AGridTrain;
 class APuzzleBlock;
+class APuzzleElevatorBlock;
+class APuzzleElevatorDock;
 class APuzzleLever;
+class APuzzleRegion;
 class APuzzleRotatingObstacle;
+class APuzzleFloorTile;
 class APuzzleRotationTile;
+struct FGridRect;
 
 /**
  * 레벨에 있는 퍼즐 조각들과, 조각 하나를 넘어 여러 조각에 걸치는 규칙들을
@@ -40,8 +46,8 @@ public:
 	void RegisterBlock(APuzzleBlock* Block);
 	void UnregisterBlock(APuzzleBlock* Block);
 
-	void RegisterTile(APuzzleRotationTile* Tile);
-	void UnregisterTile(APuzzleRotationTile* Tile);
+	void RegisterTile(APuzzleFloorTile* Tile);
+	void UnregisterTile(APuzzleFloorTile* Tile);
 
 	/**
 	 * 돌아가는 장애물은 밀 수 있는 블록과 따로 관리한다.
@@ -55,6 +61,43 @@ public:
 
 	void RegisterLever(APuzzleLever* Lever);
 	void UnregisterLever(APuzzleLever* Lever);
+
+	/**
+	 * 퍼즐 구간. 조각을 담는 영역이므로 조각 목록과 따로 둔다.
+	 *
+	 * 구간은 등록만 되고 서로를 모른다. 소속 판정은 블록이 BeginPlay에서 한 번 하고
+	 * 그 결과를 들고 다닌다.
+	 */
+	void RegisterRegion(APuzzleRegion* Region);
+	void UnregisterRegion(APuzzleRegion* Region);
+
+	/**
+	 * 열차. 퍼즐 조각은 아니지만 커서 앞을 가리는 큰 물체라 여기 등록한다.
+	 *
+	 * GetBlockActors가 이것들을 함께 돌려주므로, 바닥을 찾는 두 번째 트레이스가 차체를
+	 * 통과해 뒤쪽 승강장 셀을 짚는다. 등록하지 않으면 열차가 서 있는 동안 그 뒤 승강장을
+	 * 클릭할 수 없다.
+	 */
+	void RegisterVehicle(AGridTrain* Vehicle);
+	void UnregisterVehicle(AGridTrain* Vehicle);
+
+	int32 GetNumVehicles() const { return Vehicles.Num(); }
+
+	/**
+	 * 사각형 전체를 담는 첫 번째 구간. 없으면 null.
+	 *
+	 * 구간은 겹치지 않는 것이 전제이므로 "첫 번째"는 사실상 "유일한"이다. 겹쳐 있으면
+	 * 구간 자신이 BeginPlay에서 경고한다.
+	 */
+	APuzzleRegion* FindRegionContaining(const FGridRect& Rect) const;
+
+	/**
+	 * 이 엘리베이터를 완전히 담고 있는 승강 구조물. 없으면 null.
+	 *
+	 * 구조물도 바닥 타일이라 Tiles에 들어 있다. 컨트롤러가 엘리베이터 클릭을 처리할 때
+	 * "지금 이 차체가 구조물 위에 있는가"를 여기서 묻는다.
+	 */
+	APuzzleElevatorDock* FindDockUnder(const APuzzleElevatorBlock& Elevator) const;
 
 	const TArray<TWeakObjectPtr<APuzzleBlock>>& GetBlocks() const { return Blocks; }
 
@@ -114,9 +157,11 @@ public:
 
 private:
 	TArray<TWeakObjectPtr<APuzzleBlock>> Blocks;
-	TArray<TWeakObjectPtr<APuzzleRotationTile>> Tiles;
+	TArray<TWeakObjectPtr<APuzzleFloorTile>> Tiles;
 	TArray<TWeakObjectPtr<APuzzleRotatingObstacle>> Obstacles;
 	TArray<TWeakObjectPtr<APuzzleLever>> Levers;
+	TArray<TWeakObjectPtr<APuzzleRegion>> Regions;
+	TArray<TWeakObjectPtr<AGridTrain>> Vehicles;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0

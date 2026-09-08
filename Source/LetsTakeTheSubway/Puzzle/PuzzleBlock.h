@@ -10,6 +10,8 @@
 #include "PuzzleBlock.generated.h"
 
 class AGridActor;
+class APuzzleRegion;
+class UChildActorComponent;
 class UPuzzleSubsystem;
 class UStaticMeshComponent;
 
@@ -42,7 +44,15 @@ public:
 	{
 		Idle,
 		Sliding,
-		Rotating
+		Rotating,
+
+		/**
+		 * 엘리베이터가 층 사이를 오가는 중.
+		 *
+		 * 슬라이드·회전과 같은 목록에 두는 이유는 IsAnimating() 하나로 입력 잠금이 결정되기
+		 * 때문이다. 승강 중에 블록을 밀 수 있으면 퍼즐이 절반쯤 다른 층에 놓인다.
+		 */
+		Lifting
 	};
 
 	// ---------------------------------------------------------------- 편집 설정
@@ -78,6 +88,21 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
 	bool bOneStepPerDrag = true;
+
+	/**
+	 * 그레이박스 큐브 대신 보여 줄 아트 액터. 비워 두면 지금까지처럼 큐브를 그린다.
+	 *
+	 * 아트 에셋을 이 클래스의 부모로 삼지 않고 자식 액터로 품는 이유는 소유권이다. 아트
+	 * 블루프린트는 아트가 계속 고치는 물건이라, 리페어런팅으로 게임플레이 클래스에 묶으면
+	 * 양쪽이 같은 에셋을 두고 부딪힌다. 자식으로 두면 아트는 자기 블루프린트만 고치면 되고
+	 * 퍼즐 코드는 그것을 모른 채로 남는다.
+	 *
+	 * 아트는 **보여 주기만 한다.** 커서 판정과 그리드 트레이스는 그대로 그레이박스 프록시가
+	 * 맡는다(SanitiseVisualActor에서 자식의 콜리전을 전부 끈다). 그래야 조각을 잡는 규칙이
+	 * 아트 메시의 모양에 좌우되지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Art")
+	TSubclassOf<AActor> VisualActorClass;
 
 	// --- CUTAWAY DISABLED 2026-09-04 -------------------------------------------------
 	// 폰을 가리는 블록을 납작하게 만드는 기능은 당분간 꺼 둔다. 다시 켤 수 있도록 코드는
@@ -155,10 +180,33 @@ public:
 	/** 블록이 서 있는 바닥의 높이. BeginPlay에서 한 번만 기록한다. */
 	double GetFloorZ() const { return FloorZ; }
 
+	/**
+	 * 이 블록이 벗어날 수 없는 퍼즐 구간. 구간이 없는 레벨에서는 null이며 제한도 없다.
+	 *
+	 * 소속은 BeginPlay에서 한 번 정해지고 이후 바뀌지 않는다. 블록이 구간 사이를 옮겨
+	 * 다닐 수 있다면 "이 퍼즐의 조각"이라는 말 자체가 성립하지 않는다.
+	 */
+	APuzzleRegion* GetHomeRegion() const { return HomeRegion.Get(); }
+
 	// ---------------------------------------------------------------- 이동
 
 	/** 지금 당장 그 방향으로 한 걸음 갈 수 있으면 true. */
 	bool CanSlide(EGridDirection Dir, FText* OutReason = nullptr) const;
+
+	/**
+	 * 조각 자신의 사정으로 지금 움직일 수 없으면 false.
+	 *
+	 * 목적지와 무관한 이유를 위한 자리다. 엘리베이터는 누가 타고 있으면 거부한다.
+	 */
+	virtual bool CanStartMoving(FText* OutReason = nullptr) const { return true; }
+
+	/**
+	 * 목적지 사각형이 이 조각에게 맞는지.
+	 *
+	 * 기본 블록에게는 바닥이 있으면 그만이지만, 엘리베이터는 지금 서 있는 층과 같은 높이의
+	 * 바닥으로만 나갈 수 있다. 위층으로 올라간 차체가 샤프트로 되돌아가면 허공에 뜬다.
+	 */
+	virtual bool CanOccupyRect(const FGridRect& Rect, FText* OutReason = nullptr) const { return true; }
 
 	/** 한 셀 이동을 시작한다. 셀은 즉시 점유되므로 이동 중에 다른 것이 차지할 수 없다. */
 	bool StartSlide(EGridDirection Dir);
@@ -198,6 +246,18 @@ protected:
 	/** 몸체의 크기와 색을 다시 맞춘다. 풋프린트나 높이가 바뀔 때마다 호출된다. */
 	virtual void RefreshVisual();
 
+	/** 아트 액터가 붙어 있으면 true. 파생 클래스가 자기 그레이박스 장식을 숨길 때 쓴다. */
+	bool IsUsingArtVisual() const { return VisualActorClass != nullptr; }
+
+	/**
+	 * 자식 아트 액터를 순수한 장식으로 만든다.
+	 *
+	 * 콜리전을 전부 끄고 그리드 생성 무시 태그를 붙인다. 그러지 않으면 아트 메시가 커서
+	 * 트레이스를 가로채 잡는 규칙이 메시 모양에 좌우되고, 그리드 생성이 아트를 바닥으로
+	 * 구워 조각이 놓인 자리를 지형으로 굳혀 버린다.
+	 */
+	void SanitiseVisualActor();
+
 	/**
 	 * 서브시스템의 등록부에 들어간다. 조각이 다른 목록에 들어갈 수 있도록 오버라이드한다:
 	 * 돌아가는 장애물이 밀 수 있는 블록 사이에 나타나면 안 되는데, 그러면 드래그 코드가
@@ -209,11 +269,29 @@ protected:
 	/** 이전에 점유했던 셀을 모두 풀고 현재 셀을 그리드에 점유(등록)한다. */
 	void ClaimCells();
 
+	/** 액터를 현재 사각 영역의 정확한 중심으로 옮긴다. */
+	void SnapToRect();
+
+	/**
+	 * 조각이 서 있는 바닥 높이를 바꾼다. 층을 옮긴 엘리베이터만 쓴다.
+	 *
+	 * 슬라이드 목표와 스냅이 모두 이 값을 기준으로 계산되므로, 새 층에 도착한 뒤 갱신하지
+	 * 않으면 차체가 옆으로 밀릴 때 원래 층 높이로 되돌아간다.
+	 */
+	void SetFloorZ(double InFloorZ) { FloorZ = InFloorZ; }
+
+	EAnimState GetAnimState() const { return AnimState; }
+	void SetAnimState(EAnimState InState) { AnimState = InState; }
+
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Block")
 	TObjectPtr<USceneComponent> SceneRoot;
 
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Block")
 	TObjectPtr<UStaticMeshComponent> BodyMesh;
+
+	/** VisualActorClass를 담는 자리. 클래스가 비어 있으면 아무것도 만들지 않는다. */
+	UPROPERTY(VisibleAnywhere, Category = "Puzzle Block|Art")
+	TObjectPtr<UChildActorComponent> VisualActor;
 
 	/** 점유한 사각 영역의 최소 모서리, 그리드 셀 단위. */
 	FIntPoint MinCell = FIntPoint::ZeroValue;
@@ -223,10 +301,10 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<AGridActor> Grid;
 
-private:
-	/** 액터를 현재 사각 영역의 정확한 중심으로 옮긴다. */
-	void SnapToRect();
+	/** BeginPlay에서 자기 사각형을 담는 구간을 찾아 기억한다. */
+	TWeakObjectPtr<APuzzleRegion> HomeRegion;
 
+private:
 	/** 회전 타일이 반응할 수 있도록 블록이 정지했음을 서브시스템에 알린다. */
 	void ReportAtRest();
 

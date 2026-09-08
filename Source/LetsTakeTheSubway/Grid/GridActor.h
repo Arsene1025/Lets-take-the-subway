@@ -252,6 +252,21 @@ public:
 	/** 링을 넓혀 가며 걸을 수 있는 셀을 찾는다. 스폰 시 폰을 배치할 때 쓴다. */
 	bool FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const APawn* Pawn, FIntPoint& OutCell) const;
 
+	/**
+	 * 그리드 밖의 월드 위치에서 걸어 들어갈 셀을 고른다.
+	 *
+	 * 움직이는 것 위에서 그리드로 돌아오는 모든 경우가 이 함수를 쓴다: 승강장 밖에서 나오는
+	 * 행인, 엘리베이터에서 내리는 폰, 열차에서 내리는 폰. 셋 다 셀이 없는 자리에서 시작하고
+	 * 셋 다 순간이동이 아니라 걸어 들어가야 한다.
+	 *
+	 * FindNearestWalkableCell과 달리 링 스캔에서 처음 걸린 셀을 돌려주지 않는다. 그 방식은
+	 * 스캔 순서 때문에 실제로 가장 가깝지 않은 셀을 고를 수 있고, 경로가 없는 섬으로 들어갈
+	 * 수도 있다. 여기서는 후보가 처음 나온 반경 안에서 월드 거리로 가장 가깝고, Goal이
+	 * 주어졌다면 거기까지 길이 있는 셀을 고른다.
+	 */
+	bool FindEntryCell(const FVector& FromWorld, int32 MaxRadius, const APawn* Pawn,
+		const TOptional<FIntPoint>& Goal, FIntPoint& OutCell) const;
+
 	/** 그리드 위 A*. OutPath는 Start를 제외하고 Goal로 끝난다. */
 	bool FindPath(FIntPoint Start, FIntPoint Goal, const APawn* Pawn, TArray<FIntPoint>& OutPath) const;
 

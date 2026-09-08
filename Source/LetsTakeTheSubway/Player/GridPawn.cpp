@@ -95,7 +95,9 @@ void AGridPawn::BeginPlay()
 
 	if (!Grid->CanPawnEnter(SpawnCell, this))
 	{
-		if (!Grid->FindNearestWalkableCell(SpawnCell, 8, this, StartCell))
+		// 행인·하차와 같은 규칙으로 고른다. 여기서는 걸어 들어가지 않고 그 셀에 그대로
+		// 세운다 -- 레벨이 시작되기도 전에 폰이 어딘가에서 걸어 나오면 이상하다.
+		if (!Grid->FindEntryCell(GetActorLocation(), 8, this, TOptional<FIntPoint>(), StartCell))
 		{
 			UE_LOG(LogLTTSGrid, Error,
 				TEXT("%s: spawned at cell (%d,%d) with no walkable cell within 8 cells."),
@@ -183,6 +185,13 @@ void AGridPawn::RequestMoveToCell(FIntPoint Goal)
 		return;
 	}
 
+	// 탈것 위에서는 셀 경로가 없다. 컨트롤러도 이때는 클릭을 넘기지 않지만, 여기서 한 번
+	// 더 막아 두면 어느 경로로 들어오든 같은 답이 된다.
+	if (RideState != ERideState::OnGrid)
+	{
+		return;
+	}
+
 	if (IsMoving())
 	{
 		// 두 셀 사이 위치에서 재계획하면 모호하므로, 클릭을 기억해 뒀다가 폰이 다시
@@ -216,6 +225,12 @@ void AGridPawn::TeleportToCell(FIntPoint Cell)
 {
 	Path.Reset();
 	PendingGoal.Reset();
+	bBumping = false;
+
+	// 셀로 직접 옮기는 것은 언제나 그리드 위에 선다는 뜻이다. 탈것에 붙은 채로 옮겨지면
+	// 다음 틱에 탈것이 위치를 도로 가져간다.
+	Vehicle.Reset();
+	RideState = ERideState::OnGrid;
 
 	CurrentCell = Cell;
 	GoalCell = Cell;
@@ -265,10 +280,190 @@ bool AGridPawn::PlanPath(FIntPoint Goal)
 	return true;
 }
 
+// ---------------------------------------------------------------------------- 탑승과 하차
+
+void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld)
+{
+	if (!InVehicle)
+	{
+		return;
+	}
+
+	// 그리드 위에서 하던 일은 전부 버린다. 탈것 위에서는 셀 경로가 의미를 잃는다.
+	Path.Reset();
+	PendingGoal.Reset();
+	bBumping = false;
+	GoalCell = CurrentCell;
+	RefreshPathDebug();
+
+	Vehicle = InVehicle;
+	WalkTarget = SeatWorld;
+	RideState = ERideState::Entering;
+
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: boarding %s from cell (%d,%d)."),
+		*GetName(), *InVehicle->GetName(), CurrentCell.X, CurrentCell.Y);
+}
+
+void AGridPawn::WalkOntoGrid(const FVector& NearWorld, int32 SearchRadius)
+{
+	if (!EnsureGrid())
+	{
+		return;
+	}
+
+	FIntPoint Entry = FIntPoint::ZeroValue;
+	if (!Grid->FindEntryCell(NearWorld, SearchRadius, this, TOptional<FIntPoint>(), Entry))
+	{
+		// 내릴 곳이 없다면 마지막으로 알던 셀로 되돌린다. 그리드 밖에 폰을 버려 두는 것보다
+		// 낫다 -- 그 상태에서는 클릭도 길찾기도 되지 않는다.
+		UE_LOG(LogLTTSGrid, Error,
+			TEXT("%s: no walkable cell within %d cells of the exit; returning to cell (%d,%d)."),
+			*GetName(), SearchRadius, CurrentCell.X, CurrentCell.Y);
+
+		Vehicle.Reset();
+		RideState = ERideState::OnGrid;
+		TeleportToCell(CurrentCell);
+		return;
+	}
+
+	LandingCell = Entry;
+	WalkTarget = CellStandLocation(Entry);
+	RideState = ERideState::Leaving;
+
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: leaving %s towards cell (%d,%d)."),
+		*GetName(), *GetNameSafe(Vehicle.Get()), Entry.X, Entry.Y);
+}
+
+void AGridPawn::Bump(FIntPoint TowardCell)
+{
+	// 서 있을 때만 흔든다. 걷는 중에 위치를 덧씌우면 스텝 보간과 서로 싸운다.
+	if (!Grid || RideState != ERideState::OnGrid || !Path.IsEmpty() || bBumping)
+	{
+		return;
+	}
+
+	const FVector Here = CellStandLocation(CurrentCell);
+	const FVector There = Grid->CellToWorld(TowardCell);
+	const FVector Delta = FVector(There.X - Here.X, There.Y - Here.Y, 0.0);
+
+	if (Delta.IsNearlyZero())
+	{
+		return;
+	}
+
+	BumpDirection = Delta.GetSafeNormal();
+	BumpElapsed = 0.0f;
+	bBumping = true;
+}
+
+void AGridPawn::TickStraightWalk(float DeltaSeconds)
+{
+	const FVector OldLocation = GetActorLocation();
+	const FVector NewLocation = FMath::VInterpConstantTo(OldLocation, WalkTarget, DeltaSeconds, MoveSpeed);
+	SetActorLocation(NewLocation);
+	RollBody(NewLocation - OldLocation);
+
+	if (!NewLocation.Equals(WalkTarget, 0.5))
+	{
+		return;
+	}
+
+	SetActorLocation(WalkTarget);
+
+	if (RideState == ERideState::Entering)
+	{
+		AActor* Ride = Vehicle.Get();
+		if (!Ride)
+		{
+			// 걸어 들어가는 사이에 탈것이 사라졌다. 발밑에서 다시 그리드를 찾는다.
+			RideState = ERideState::OnGrid;
+			WalkOntoGrid(GetActorLocation());
+			return;
+		}
+
+		// 좌석 오프셋은 붙는 순간에 잰다. 그래야 탈것이 그동안 조금 움직였더라도 폰이
+		// 지금 서 있는 자리에 그대로 실린다.
+		RideOffset = GetActorLocation() - Ride->GetActorLocation();
+		RideState = ERideState::Riding;
+		return;
+	}
+
+	// Leaving: 여기서부터 다시 그리드 위다.
+	CurrentCell = LandingCell;
+	GoalCell = LandingCell;
+	Vehicle.Reset();
+	RideState = ERideState::OnGrid;
+
+	Grid->NotifyPawnEnteredCell(this, CurrentCell);
+	RefreshPathDebug();
+
+	ReportFeedback(
+		FString::Printf(TEXT("Stepped off at (%d,%d)."), CurrentCell.X, CurrentCell.Y),
+		FLinearColor::White);
+}
+
+void AGridPawn::TickRide(float DeltaSeconds)
+{
+	AActor* Ride = Vehicle.Get();
+	if (!Ride)
+	{
+		RideState = ERideState::OnGrid;
+		WalkOntoGrid(GetActorLocation());
+		return;
+	}
+
+	SetActorLocation(Ride->GetActorLocation() + RideOffset);
+}
+
+void AGridPawn::TickBump(float DeltaSeconds)
+{
+	BumpElapsed += DeltaSeconds;
+
+	const float Alpha = FMath::Clamp(BumpElapsed / FMath::Max(BumpDuration, KINDA_SMALL_NUMBER), 0.0f, 1.0f);
+
+	// 반주기 사인이면 나갔다가 정확히 제자리로 돌아온다. 끝에서 위치를 따로 복구할 필요가 없다.
+	const double Offset = BumpDistance * FMath::Sin(PI * Alpha);
+	SetActorLocation(CellStandLocation(CurrentCell) + BumpDirection * Offset);
+
+	if (Alpha >= 1.0f)
+	{
+		bBumping = false;
+		SetActorLocation(CellStandLocation(CurrentCell));
+	}
+}
+
 void AGridPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	switch (RideState)
+	{
+	case ERideState::Entering:
+	case ERideState::Leaving:
+		TickStraightWalk(DeltaSeconds);
+		return;
+
+	case ERideState::Riding:
+		TickRide(DeltaSeconds);
+		return;
+
+	default:
+		break;
+	}
+
+	if (bBumping)
+	{
+		TickBump(DeltaSeconds);
+		return;
+	}
+
+	TickGridStep(DeltaSeconds);
+}
+
+void AGridPawn::TickGridStep(float DeltaSeconds)
+{
 	if (!Grid || Path.IsEmpty())
 	{
 		return;

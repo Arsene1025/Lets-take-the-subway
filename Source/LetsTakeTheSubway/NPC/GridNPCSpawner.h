@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -9,6 +9,21 @@
 class AGridActor;
 class AGridNPC;
 class UStaticMeshComponent;
+
+/** 스포너가 언제 행인을 내보내는지. */
+UENUM(BlueprintType)
+enum class ENPCSpawnMode : uint8
+{
+	/** 일정 간격으로 계속. 배경을 채우는 통행량이다. */
+	Interval	UMETA(DisplayName = "Interval"),
+
+	/**
+	 * 부르면 그때만. 열차가 문을 열 때처럼 사건에 맞춰 쏟아져 나와야 하는 경우다.
+	 *
+	 * 타이머를 걸지 않으므로 SpawnBurst나 콘솔 명령이 없으면 아무 일도 일어나지 않는다.
+	 */
+	OnDemand	UMETA(DisplayName = "On demand")
+};
 
 /**
  * 정해진 간격으로 행인을 내보내는 지점.
@@ -47,7 +62,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "NPC Spawner")
 	TArray<FIntPoint> Waypoints;
 
-	UPROPERTY(EditAnywhere, Category = "NPC Spawner", meta = (ClampMin = 0.1))
+	/**
+	 * 간격 스폰인지, 불렀을 때만 나오는지.
+	 *
+	 * 열차 하차용 스포너는 OnDemand로 두고 열차의 정차역이 이 스포너를 가리킨다. 스포너를
+	 * 열차가 아니라 승강장에 두는 이유는 경유 셀이 역마다 다르기 때문이다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "NPC Spawner")
+	ENPCSpawnMode SpawnMode = ENPCSpawnMode::Interval;
+
+	UPROPERTY(EditAnywhere, Category = "NPC Spawner",
+		meta = (ClampMin = 0.1, EditCondition = "SpawnMode == ENPCSpawnMode::Interval", EditConditionHides))
 	float SpawnInterval = 4.0f;
 
 	/** 게임 시작 후 첫 행인이 나오기까지의 시간(초). */
@@ -82,6 +107,16 @@ public:
 	/** 지금 하나 내보낸다. bIgnoreCap이면 MaxAlive를 무시한다(콘솔 시험용). */
 	AGridNPC* SpawnOne(bool bIgnoreCap = false);
 
+	/**
+	 * Count명을 Spacing초 간격으로 줄지어 내보낸다. MaxAlive는 무시한다.
+	 *
+	 * 열차에서 내리는 무리가 이것이다. 상한을 무시하는 이유는 하차 인원이 승강장을 배회하는
+	 * 배경 통행량과는 다른 사건이기 때문이다 -- 상한에 걸려 두 명만 내리면 열차가 비어
+	 * 보인다. 한 명씩 간격을 두는 것은 문 하나에서 세 명이 같은 프레임에 겹쳐 나오지 않게
+	 * 하기 위해서다.
+	 */
+	void SpawnBurst(int32 Count, float Spacing = 0.6f);
+
 	/** 행인이 경로를 못 찾았다. 저작 오류이므로 스포너를 멈춘다. */
 	void ReportRouteFailure(const AGridNPC& NPC, FIntPoint From, FIntPoint To);
 
@@ -90,6 +125,10 @@ public:
 
 private:
 	void OnSpawnTimer();
+
+	/** 버스트 타이머 콜백. 남은 인원을 하나씩 줄여 가며 내보낸다. */
+	void OnBurstTimer();
+
 	void PruneAlive();
 
 	UPROPERTY(VisibleAnywhere, Category = "NPC Spawner")
@@ -111,6 +150,11 @@ private:
 	TArray<TWeakObjectPtr<AGridNPC>> Alive;
 
 	FTimerHandle SpawnTimer;
+
+	/** 버스트는 자기 타이머를 쓴다. 간격 스폰과 섞이면 둘 중 하나가 상대를 끊는다. */
+	FTimerHandle BurstTimer;
+
+	int32 BurstRemaining = 0;
 
 	int32 NumSpawned = 0;
 	bool bLoggedRouteFailure = false;

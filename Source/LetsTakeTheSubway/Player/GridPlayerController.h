@@ -9,6 +9,7 @@
 
 class AGridActor;
 class AGridPawn;
+class AGridTrain;
 class APuzzleBlock;
 class APuzzleLever;
 class UInputAction;
@@ -22,7 +23,16 @@ struct FCursorPick
 		None,
 		Floor,
 		Block,
-		Lever
+		Lever,
+
+		/**
+		 * 열차. 폰이 지금 정차 중인 열차의 문 앞 셀에 서 있을 때만 잡힌다.
+		 *
+		 * 조건을 픽 단계에 두는 이유는 차체가 크기 때문이다. 언제나 잡히게 하면 4 m짜리
+		 * 객차가 승강장 셀을 가려 그 뒤를 영영 클릭할 수 없고, 반대로 절대 안 잡히게 하면
+		 * 탈 방법이 없다.
+		 */
+		Vehicle
 	};
 
 	EKind Kind = EKind::None;
@@ -33,6 +43,7 @@ struct FCursorPick
 	TWeakObjectPtr<APuzzleBlock> Block;
 
 	TWeakObjectPtr<APuzzleLever> Lever;
+	TWeakObjectPtr<AGridTrain> Vehicle;
 
 	/** 레이가 조각에 닿은 위치. 그랩 지점이 된다. */
 	FVector HitLocation = FVector::ZeroVector;

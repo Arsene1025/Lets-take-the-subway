@@ -124,6 +124,22 @@ void AGridHUD::DrawHUD()
 		}
 	}
 
+	// 폰이 탈것에 실려 있는 동안에는 셀 좌표가 의미를 잃으므로, 대신 무엇을 타고 있는지 쓴다.
+	if (const AGridPawn* RidingPawn = Cast<AGridPawn>(GetOwningPawn()))
+	{
+		if (!RidingPawn->IsOnGrid())
+		{
+			const TCHAR* StateText =
+				(RidingPawn->GetRideState() == AGridPawn::ERideState::Entering) ? TEXT("boarding") :
+				(RidingPawn->GetRideState() == AGridPawn::ERideState::Riding) ? TEXT("riding") : TEXT("stepping off");
+
+			DrawText(
+				FString::Printf(TEXT("Pawn %s %s"), StateText, *GetNameSafe(RidingPawn->GetVehicle())),
+				FLinearColor(0.45f, 0.85f, 1.0f), X, Y);
+			Y += LineHeight;
+		}
+	}
+
 	if (GridController && !GridController->GetFeedbackText().IsEmpty())
 	{
 		Y += LineHeight * 0.4f;

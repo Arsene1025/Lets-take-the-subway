@@ -142,6 +142,56 @@ AGridNPC* AGridNPCSpawner::SpawnOne(bool bIgnoreCap)
 	return NPC;
 }
 
+void AGridNPCSpawner::SpawnBurst(int32 Count, float Spacing)
+{
+	if (Count <= 0)
+	{
+		return;
+	}
+
+	if (!bEnabled)
+	{
+		UE_LOG(LogLTTSGrid, Verbose,
+			TEXT("%s: burst of %d ignored; the spawner is disabled."), *GetName(), Count);
+		return;
+	}
+
+	// 첫 명은 지금 바로 내보낸다. 문이 열리는 순간과 사람이 나오기 시작하는 순간이 붙어
+	// 있어야 열차에서 내리는 것으로 읽힌다.
+	SpawnOne(true);
+
+	BurstRemaining = Count - 1;
+	if (BurstRemaining <= 0)
+	{
+		return;
+	}
+
+	// 이전 버스트가 아직 남아 있으면 덮어쓴다. 문이 다시 열렸다는 뜻이므로 지난 무리를
+	// 마저 뱉는 것보다 새 무리를 내보내는 편이 맞다.
+	GetWorldTimerManager().SetTimer(
+		BurstTimer, this, &AGridNPCSpawner::OnBurstTimer, FMath::Max(Spacing, 0.05f), true);
+
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: burst of %d NPC(s), %.2f s apart."), *GetName(), Count, Spacing);
+}
+
+void AGridNPCSpawner::OnBurstTimer()
+{
+	if (BurstRemaining <= 0)
+	{
+		GetWorldTimerManager().ClearTimer(BurstTimer);
+		return;
+	}
+
+	--BurstRemaining;
+	SpawnOne(true);
+
+	if (BurstRemaining <= 0)
+	{
+		GetWorldTimerManager().ClearTimer(BurstTimer);
+	}
+}
+
 void AGridNPCSpawner::OnSpawnTimer()
 {
 	PruneAlive();
@@ -225,6 +275,15 @@ void AGridNPCSpawner::BeginPlay()
 	}
 
 	const FIntPoint SpawnCell = Grid->WorldToCell(GetActorLocation());
+
+	if (SpawnMode == ENPCSpawnMode::OnDemand)
+	{
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("%s: at cell (%d,%d), %d waypoints valid, on demand only; no timer."),
+			*GetName(), SpawnCell.X, SpawnCell.Y, Waypoints.Num());
+		return;
+	}
+
 	UE_LOG(LogLTTSGrid, Display,
 		TEXT("%s: at cell (%d,%d), %d waypoints valid, every %.1f s, up to %d alive; timer started."),
 		*GetName(), SpawnCell.X, SpawnCell.Y, Waypoints.Num(), SpawnInterval, MaxAlive);
@@ -237,6 +296,8 @@ void AGridNPCSpawner::BeginPlay()
 void AGridNPCSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(SpawnTimer);
+	GetWorldTimerManager().ClearTimer(BurstTimer);
+	BurstRemaining = 0;
 
 	// 스포너만 지워진 경우에만 자기 행인을 거둔다. 월드 자체가 끝나는 중이라면 엔진이 이미
 	// 모두에게 EndPlay를 돌리고 있으므로 여기서 손대면 순서만 어지럽힌다.
@@ -298,9 +359,47 @@ namespace
 			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.SpawnNPC: no NPC spawner matching '%s'."), *Filter);
 		}
 	}
+
+	/**
+	 * 무리를 한 번에 내보낸다. 열차가 문을 여는 것을 기다리지 않고 하차 연출을 보기 위한 것이다.
+	 */
+	void SpawnNPCBurstCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.SpawnNPCBurst: run this in play mode."));
+			return;
+		}
+
+		const FString Filter = Args.IsValidIndex(0) ? Args[0] : FString();
+		const int32 Count = Args.IsValidIndex(1) ? FCString::Atoi(*Args[1]) : 3;
+
+		int32 Matched = 0;
+		for (TActorIterator<AGridNPCSpawner> It(World); It; ++It)
+		{
+			AGridNPCSpawner* Spawner = *It;
+			if (!Spawner || (!Filter.IsEmpty() && !Spawner->GetName().Contains(Filter)))
+			{
+				continue;
+			}
+
+			++Matched;
+			Spawner->SpawnBurst(Count);
+		}
+
+		if (Matched == 0)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.SpawnNPCBurst: no NPC spawner matching '%s'."), *Filter);
+		}
+	}
 }
 
 static FAutoConsoleCommandWithWorldAndArgs GSpawnNPCCommand(
 	TEXT("ltts.SpawnNPC"),
 	TEXT("Spawn one NPC now, ignoring the interval and the alive cap: ltts.SpawnNPC [name substring]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SpawnNPCCommand));
+
+static FAutoConsoleCommandWithWorldAndArgs GSpawnNPCBurstCommand(
+	TEXT("ltts.SpawnNPCBurst"),
+	TEXT("Spawn a group of NPCs now, as a train would: ltts.SpawnNPCBurst [name substring] [count]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SpawnNPCBurstCommand));

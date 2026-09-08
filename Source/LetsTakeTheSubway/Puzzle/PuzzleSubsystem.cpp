@@ -8,8 +8,13 @@
 #include "Player/GridPlayerController.h"
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleLever.h"
+#include "Puzzle/PuzzleElevatorBlock.h"
+#include "Puzzle/PuzzleElevatorDock.h"
+#include "Puzzle/PuzzleFloorTile.h"
+#include "Puzzle/PuzzleRegion.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleRotationTile.h"
+#include "Vehicle/GridTrain.h"
 
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -45,7 +50,7 @@ void UPuzzleSubsystem::UnregisterBlock(APuzzleBlock* Block)
 	});
 }
 
-void UPuzzleSubsystem::RegisterTile(APuzzleRotationTile* Tile)
+void UPuzzleSubsystem::RegisterTile(APuzzleFloorTile* Tile)
 {
 	if (Tile)
 	{
@@ -53,9 +58,9 @@ void UPuzzleSubsystem::RegisterTile(APuzzleRotationTile* Tile)
 	}
 }
 
-void UPuzzleSubsystem::UnregisterTile(APuzzleRotationTile* Tile)
+void UPuzzleSubsystem::UnregisterTile(APuzzleFloorTile* Tile)
 {
-	Tiles.RemoveAll([Tile](const TWeakObjectPtr<APuzzleRotationTile>& Entry)
+	Tiles.RemoveAll([Tile](const TWeakObjectPtr<APuzzleFloorTile>& Entry)
 	{
 		return !Entry.IsValid() || Entry.Get() == Tile;
 	});
@@ -93,10 +98,80 @@ void UPuzzleSubsystem::UnregisterLever(APuzzleLever* Lever)
 	});
 }
 
+void UPuzzleSubsystem::RegisterRegion(APuzzleRegion* Region)
+{
+	if (Region)
+	{
+		Regions.AddUnique(Region);
+	}
+}
+
+void UPuzzleSubsystem::UnregisterRegion(APuzzleRegion* Region)
+{
+	Regions.RemoveAll([Region](const TWeakObjectPtr<APuzzleRegion>& Entry)
+	{
+		return !Entry.IsValid() || Entry.Get() == Region;
+	});
+}
+
+void UPuzzleSubsystem::RegisterVehicle(AGridTrain* Vehicle)
+{
+	if (Vehicle)
+	{
+		Vehicles.AddUnique(Vehicle);
+	}
+}
+
+void UPuzzleSubsystem::UnregisterVehicle(AGridTrain* Vehicle)
+{
+	Vehicles.RemoveAll([Vehicle](const TWeakObjectPtr<AGridTrain>& Entry)
+	{
+		return !Entry.IsValid() || Entry.Get() == Vehicle;
+	});
+}
+
 // ---------------------------------------------------------------------------- 조회
+
+APuzzleRegion* UPuzzleSubsystem::FindRegionContaining(const FGridRect& Rect) const
+{
+	for (const TWeakObjectPtr<APuzzleRegion>& Entry : Regions)
+	{
+		APuzzleRegion* Region = Entry.Get();
+		if (Region && Region->ContainsRect(Rect))
+		{
+			return Region;
+		}
+	}
+
+	return nullptr;
+}
+
+APuzzleElevatorDock* UPuzzleSubsystem::FindDockUnder(const APuzzleElevatorBlock& Elevator) const
+{
+	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
+	{
+		APuzzleElevatorDock* Dock = Cast<APuzzleElevatorDock>(Entry.Get());
+		if (Dock && Dock->FullyContains(Elevator))
+		{
+			return Dock;
+		}
+	}
+
+	return nullptr;
+}
 
 bool UPuzzleSubsystem::IsInputLocked() const
 {
+	// 폰이 타고 내리는 동안은 조작을 받지 않는다. 그동안 플레이어는 조각들이 어디로 가는지
+	// 볼 수 없고, 폰 자신도 셀 위에 있지 않다.
+	if (const AGridPawn* Pawn = GetGridPawn())
+	{
+		if (!Pawn->IsOnGrid())
+		{
+			return true;
+		}
+	}
+
 	for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
 	{
 		if (const APuzzleBlock* Block = Entry.Get())
@@ -108,11 +183,11 @@ bool UPuzzleSubsystem::IsInputLocked() const
 		}
 	}
 
-	for (const TWeakObjectPtr<APuzzleRotationTile>& Entry : Tiles)
+	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
 	{
-		if (const APuzzleRotationTile* Tile = Entry.Get())
+		if (const APuzzleFloorTile* Tile = Entry.Get())
 		{
-			if (Tile->IsRotating())
+			if (Tile->IsBusy())
 			{
 				return true;
 			}
@@ -140,7 +215,7 @@ APuzzleBlock* UPuzzleSubsystem::FindBlockAtCell(const AGridActor& Grid, FIntPoin
 
 void UPuzzleSubsystem::GetBlockActors(TArray<AActor*>& OutActors) const
 {
-	OutActors.Reserve(OutActors.Num() + Blocks.Num() + Obstacles.Num() + Levers.Num());
+	OutActors.Reserve(OutActors.Num() + Blocks.Num() + Obstacles.Num() + Levers.Num() + Vehicles.Num());
 
 	for (const TWeakObjectPtr<APuzzleBlock>& Entry : Blocks)
 	{
@@ -163,6 +238,14 @@ void UPuzzleSubsystem::GetBlockActors(TArray<AActor*>& OutActors) const
 		if (APuzzleLever* Lever = Entry.Get())
 		{
 			OutActors.Add(Lever);
+		}
+	}
+
+	for (const TWeakObjectPtr<AGridTrain>& Entry : Vehicles)
+	{
+		if (AGridTrain* Vehicle = Entry.Get())
+		{
+			OutActors.Add(Vehicle);
 		}
 	}
 }
@@ -245,6 +328,13 @@ void UPuzzleSubsystem::GetPawnReservedCells(TArray<FIntPoint>& OutCells) const
 		return;
 	}
 
+	// 탈것에 실려 있는 폰은 그리드 위에 없다. 그동안 마지막에 서 있던 셀을 계속 잡고 있으면
+	// 엘리베이터가 떠난 뒤에도 그 자리가 영영 막힌다.
+	if (!Pawn->IsOnGrid())
+	{
+		return;
+	}
+
 	OutCells.Add(Pawn->GetCurrentCell());
 
 	if (const TOptional<FIntPoint> Next = Pawn->GetNextCell())
@@ -270,20 +360,17 @@ void UPuzzleSubsystem::NotifyBlockCameToRest(APuzzleBlock* Block)
 		return;
 	}
 
-	for (const TWeakObjectPtr<APuzzleRotationTile>& Entry : Tiles)
+	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
 	{
-		APuzzleRotationTile* Tile = Entry.Get();
+		APuzzleFloorTile* Tile = Entry.Get();
 		if (!Tile || !Tile->FullyContains(*Block))
 		{
 			continue;
 		}
 
 		// 타일은 절대 겹치지 않으므로 블록을 담는 타일은 많아야 하나다. 첫 번째에서 멈춘다.
-		FText Reason;
-		if (!Tile->TryRotate(&Reason))
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-		}
+		// 무엇을 할지는 타일이 정한다: 회전판은 공간을 돌리고, 구조물은 엘리베이터를 받는다.
+		Tile->OnBlockCameToRest(*Block);
 		return;
 	}
 }

@@ -9,27 +9,14 @@
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
 
-#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 APuzzleRotationTile::APuzzleRotationTile()
 {
-	PrimaryActorTick.bCanEverTick = true;
-
-	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
-	SetRootComponent(SceneRoot);
-
-	PadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PadMesh"));
-	PadMesh->SetupAttachment(SceneRoot);
-	PadMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PadMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
-	PadMesh->SetGenerateOverlapEvents(false);
-
 	CornerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CornerMesh"));
 	CornerMesh->SetupAttachment(SceneRoot);
 	CornerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -39,7 +26,6 @@ APuzzleRotationTile::APuzzleRotationTile()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeFinder.Succeeded())
 	{
-		PadMesh->SetStaticMesh(CubeFinder.Object);
 		CornerMesh->SetStaticMesh(CubeFinder.Object);
 	}
 
@@ -47,142 +33,42 @@ APuzzleRotationTile::APuzzleRotationTile()
 		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_Movable.MI_GreyBox_Movable"));
 	if (MaterialFinder.Succeeded())
 	{
-		PadMesh->SetMaterial(0, MaterialFinder.Object);
 		CornerMesh->SetMaterial(0, MaterialFinder.Object);
 	}
-
-	// 패드는 바닥에 놓인 장식이다. 그리드가 이것을 지오메트리로 트레이스하면 안 된다.
-	Tags.Add(LTTSGrid::GenerationIgnoreTag());
-
-	// 쿠커가 읽는 저작 데이터. 에디터 빌드 전용.
-#if WITH_EDITORONLY_DATA
-	bIsSpatiallyLoaded = false;
-#endif
 }
 
 void APuzzleRotationTile::RefreshVisual()
 {
-	const double CellSize = Grid ? Grid->CellSize : 100.0;
-	const double Span = SizeInCells * CellSize / 100.0;
-
-	// 에디터 그리드 오버레이는 셀 쿼드를 바닥에서 2 cm 위에 그리므로, 바닥에 딱 붙은 패드는
-	// 그것과 같은 평면에 놓여 뷰포트에서 찢어져 보인다. 둘 다 피해서 띄운다.
-	if (PadMesh)
-	{
-		PadMesh->SetRelativeLocation(FVector(0.0, 0.0, 5.0));
-		PadMesh->SetRelativeScale3D(FVector(Span, Span, 0.04));
-	}
+	Super::RefreshVisual();
 
 	if (CornerMesh)
 	{
+		const double CellSize = GetGrid() ? GetGrid()->CellSize : 100.0;
 		const double Inset = (SizeInCells - 1) * CellSize * 0.5;
 		CornerMesh->SetRelativeLocation(FVector(Inset, Inset, 14.0));
 		CornerMesh->SetRelativeScale3D(FVector(CellSize / 200.0, CellSize / 200.0, 0.12));
 	}
 }
 
-void APuzzleRotationTile::OnConstruction(const FTransform& Transform)
+FString APuzzleRotationTile::DescribeTile() const
 {
-	Super::OnConstruction(Transform);
-	RefreshVisual();
+	return FString::Printf(TEXT("Rotation tile, %s."), bClockwise ? TEXT("clockwise") : TEXT("counter-clockwise"));
 }
 
-void APuzzleRotationTile::BeginPlay()
+void APuzzleRotationTile::OnBlockCameToRest(APuzzleBlock& Block)
 {
-	Super::BeginPlay();
-
-	Grid = AGridActor::FindGrid(GetWorld());
-	if (!Grid)
+	// 회전판의 반응은 공간을 돌리는 것이다. 돌 수 없는 이유는 플레이어에게 보여 준다.
+	FText Reason;
+	if (!TryRotate(&Reason))
 	{
-		UE_LOG(LogLTTSGrid, Error, TEXT("%s: no AGridActor in the level; the tile is disabled."), *GetName());
-		bDisabled = true;
-		return;
-	}
-
-	const FIntPoint Size(SizeInCells, SizeInCells);
-	Region = FGridRect(GridFootprint::MinCellFromCentre(*Grid, GetActorLocation(), Size), Size);
-
-	TArray<FIntPoint> Cells;
-	Region.GatherCells(Cells);
-
-	for (const FIntPoint& Cell : Cells)
-	{
-		if (!Grid->IsValidCell(Cell))
+		if (!Reason.IsEmpty())
 		{
-			UE_LOG(LogLTTSGrid, Error,
-				TEXT("%s: cell (%d,%d) is outside the grid; the tile is disabled."), *GetName(), Cell.X, Cell.Y);
-			bDisabled = true;
-			return;
-		}
-
-		if (!Grid->IsCellWalkableStatic(Cell))
-		{
-			UE_LOG(LogLTTSGrid, Warning,
-				TEXT("%s: cell (%d,%d) is not walkable floor; rotations landing there will be refused."),
-				*GetName(), Cell.X, Cell.Y);
+			if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+			{
+				Subsystem->ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+			}
 		}
 	}
-
-	// 변의 길이가 짝수이므로 영역의 중심이 셀 모서리에 떨어진다. 회전한 모든 풋프린트를
-	// 재는 기준이 되는 회전축이 정확히 그 점이다.
-	const FVector Origin = Grid->GetGridOrigin();
-	PivotWorld = FVector(
-		Origin.X + (Region.Min.X + SizeInCells * 0.5) * Grid->CellSize,
-		Origin.Y + (Region.Min.Y + SizeInCells * 0.5) * Grid->CellSize,
-		Grid->CellToWorld(Region.Min).Z);
-
-	SetActorLocation(FVector(PivotWorld.X, PivotWorld.Y, PivotWorld.Z));
-	RefreshVisual();
-
-	// 겹치는 타일들은 그 사이에 멈춘 블록을 둘 다 자기 것이라 주장하게 되고, 어느 쪽이
-	// 이기는지는 등록 순서가 결정하게 된다.
-	for (TActorIterator<APuzzleRotationTile> It(GetWorld()); It; ++It)
-	{
-		const APuzzleRotationTile* Other = *It;
-		if (Other && Other != this && !Other->bDisabled && Other->Region.Overlaps(Region))
-		{
-			UE_LOG(LogLTTSGrid, Warning,
-				TEXT("%s: overlaps rotation tile %s. Tiles must be disjoint."), *GetName(), *Other->GetName());
-		}
-	}
-
-	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
-	{
-		Subsystem->RegisterTile(this);
-	}
-
-	UE_LOG(LogLTTSGrid, Display,
-		TEXT("%s: %dx%d rotation tile at cell (%d,%d), %s."),
-		*GetName(), SizeInCells, SizeInCells, Region.Min.X, Region.Min.Y,
-		bClockwise ? TEXT("clockwise") : TEXT("counter-clockwise"));
-}
-
-void APuzzleRotationTile::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
-	{
-		Subsystem->UnregisterTile(this);
-	}
-
-	Super::EndPlay(EndPlayReason);
-}
-
-// ---------------------------------------------------------------------------- 포함 판정
-
-bool APuzzleRotationTile::FullyContains(const APuzzleBlock& Block) const
-{
-	return !bDisabled && Region.ContainsRect(Block.GetRect());
-}
-
-bool APuzzleRotationTile::Straddles(const APuzzleBlock& Block) const
-{
-	if (bDisabled)
-	{
-		return false;
-	}
-
-	const FGridRect BlockRect = Block.GetRect();
-	return Region.Overlaps(BlockRect) && !Region.ContainsRect(BlockRect);
 }
 
 // ---------------------------------------------------------------------------- 회전
@@ -365,45 +251,3 @@ void APuzzleRotationTile::Tick(float DeltaSeconds)
 		PendingPawnCell.Reset();
 	}
 }
-
-// ---------------------------------------------------------------------------- 에디터
-
-#if WITH_EDITOR
-
-void APuzzleRotationTile::PostEditMove(bool bFinished)
-{
-	Super::PostEditMove(bFinished);
-
-	if (!bFinished)
-	{
-		return;
-	}
-
-	const AGridActor* FoundGrid = AGridActor::FindGrid(GetWorld());
-	if (!FoundGrid)
-	{
-		return;
-	}
-
-	const FIntPoint Size(SizeInCells, SizeInCells);
-	const FIntPoint SnappedMin = GridFootprint::MinCellFromCentre(*FoundGrid, GetActorLocation(), Size);
-	if (!FoundGrid->IsValidCell(SnappedMin))
-	{
-		return;
-	}
-
-	Modify();
-	SetActorRotation(FRotator::ZeroRotator);
-	SetActorLocation(GridFootprint::CentreFromMinCell(
-		*FoundGrid, SnappedMin, Size, FoundGrid->CellToWorld(SnappedMin).Z));
-}
-
-void APuzzleRotationTile::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
-{
-	Super::PostEditChangeProperty(PropertyChangedEvent);
-
-	RefreshVisual();
-	PostEditMove(true);
-}
-
-#endif

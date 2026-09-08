@@ -5,8 +5,10 @@
 #include "LetsTakeTheSubway.h"
 #include "Grid/GridActor.h"
 #include "Player/GridPawn.h"
+#include "Puzzle/PuzzleRegion.h"
 #include "Puzzle/PuzzleSubsystem.h"
 
+#include "Components/ChildActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -44,6 +46,10 @@ APuzzleBlock::APuzzleBlock()
 	{
 		BodyMesh->SetMaterial(0, MaterialFinder.Object);
 	}
+
+	// 아트 액터 자리. 클래스를 지정하기 전에는 비어 있어 아무 비용도 들지 않는다.
+	VisualActor = CreateDefaultSubobject<UChildActorComponent>(TEXT("VisualActor"));
+	VisualActor->SetupAttachment(SceneRoot);
 
 	// 그리드는 블록 자체가 아니라 블록 아래의 바닥을 트레이스해야 한다.
 	Tags.Add(LTTSGrid::GenerationIgnoreTag());
@@ -101,12 +107,53 @@ FBox APuzzleBlock::GetFullBounds() const
 
 // ---------------------------------------------------------------------------- 배치
 
+void APuzzleBlock::SanitiseVisualActor()
+{
+	AActor* Child = VisualActor ? VisualActor->GetChildActor() : nullptr;
+	if (!Child)
+	{
+		return;
+	}
+
+	// 그리드 생성이 아트를 바닥으로 구우면 조각이 우연히 놓인 자리가 지형으로 굳는다.
+	Child->Tags.AddUnique(LTTSGrid::GenerationIgnoreTag());
+
+	// 커서 판정은 그레이박스 프록시가 맡는다. 아트가 트레이스를 가로채면 조각을 잡는
+	// 규칙이 메시 모양에 따라 달라지고, 아트가 바뀔 때마다 조작감이 흔들린다.
+	TArray<UPrimitiveComponent*> Primitives;
+	Child->GetComponents(Primitives);
+	for (UPrimitiveComponent* Primitive : Primitives)
+	{
+		Primitive->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Primitive->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Primitive->SetGenerateOverlapEvents(false);
+	}
+}
+
 void APuzzleBlock::RefreshVisual()
 {
+	const bool bArt = IsUsingArtVisual();
+
+	if (VisualActor)
+	{
+		if (VisualActor->GetChildActorClass() != VisualActorClass)
+		{
+			VisualActor->SetChildActorClass(VisualActorClass);
+		}
+
+		// 아트 원점은 풋프린트 중심의 바닥이다. 액터 원점과 같은 규약이라 보정이 없다.
+		VisualActor->SetRelativeLocation(FVector::ZeroVector);
+		SanitiseVisualActor();
+	}
+
 	if (!BodyMesh)
 	{
 		return;
 	}
+
+	// 아트가 붙으면 큐브는 보이지 않게만 하고 콜리전은 남긴다. 눈에 보이는 것은 아트이고,
+	// 커서가 잡는 것은 언제나 풋프린트와 정확히 같은 이 상자다.
+	BodyMesh->SetVisibility(!bArt);
 
 	// 풋프린트는 로컬 프레임에서 지정하고 회전은 액터의 yaw가 담당하므로, 메시는 항상
 	// 회전하지 않은 크기 기준으로 조정한다.
@@ -223,11 +270,22 @@ void APuzzleBlock::BeginPlay()
 	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
 	{
 		RegisterWithSubsystem(*Subsystem);
+
+		// 소속 구간은 여기서 한 번 정한다. 구간이 하나도 없는 레벨(러쉬아워·회전 장애물
+		// 프로토타입)은 지금까지처럼 제한 없이 동작해야 하므로, 못 찾은 것은 오류가 아니라
+		// 경고다.
+		HomeRegion = Subsystem->FindRegionContaining(GetRect());
+		if (!HomeRegion.IsValid())
+		{
+			UE_LOG(LogLTTSGrid, Warning,
+				TEXT("%s: not inside any puzzle region; its movement is unrestricted."), *GetName());
+		}
 	}
 
 	UE_LOG(LogLTTSGrid, Display,
-		TEXT("%s: %dx%d block at cell (%d,%d), %d quarter turn(s)."),
-		*GetName(), WorldFootprint.X, WorldFootprint.Y, MinCell.X, MinCell.Y, QuarterTurns);
+		TEXT("%s: %dx%d block at cell (%d,%d), %d quarter turn(s), region %s."),
+		*GetName(), WorldFootprint.X, WorldFootprint.Y, MinCell.X, MinCell.Y, QuarterTurns,
+		HomeRegion.IsValid() ? *HomeRegion->GetDisplayName() : TEXT("none"));
 }
 
 void APuzzleBlock::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -254,6 +312,13 @@ bool APuzzleBlock::CanSlide(EGridDirection Dir, FText* OutReason) const
 		return false;
 	}
 
+	// 조각 자신의 사정을 먼저 본다. 누가 타고 있는 엘리베이터는 어느 방향이든 못 움직이므로,
+	// 축이나 목적지를 따지기 전에 답이 정해진다.
+	if (!CanStartMoving(OutReason))
+	{
+		return false;
+	}
+
 	if (!LTTSPuzzle::AxisAllowsDirection(GetWorldMoveAxis(), Dir))
 	{
 		if (OutReason)
@@ -264,6 +329,25 @@ bool APuzzleBlock::CanSlide(EGridDirection Dir, FText* OutReason) const
 	}
 
 	const FGridRect Target(MinCell + LTTSGrid::DirOffset(Dir), GetWorldFootprint());
+
+	if (!CanOccupyRect(Target, OutReason))
+	{
+		return false;
+	}
+
+	// 구간 경계는 바닥이나 점유보다 먼저 본다. 퍼즐의 규칙이지 지형 사정이 아니므로,
+	// 플레이어에게 "여기까지가 이 퍼즐이다"라고 말해 주는 편이 "바닥이 없다"보다 정확하다.
+	if (const APuzzleRegion* Region = HomeRegion.Get())
+	{
+		if (Region->bClampBlocks && !Region->ContainsRect(Target))
+		{
+			if (OutReason)
+			{
+				*OutReason = NSLOCTEXT("LTTSPuzzle", "BlockLeavesRegion", "This piece cannot leave the puzzle area.");
+			}
+			return false;
+		}
+	}
 
 	TArray<FIntPoint> Cells;
 	Target.GatherCells(Cells);

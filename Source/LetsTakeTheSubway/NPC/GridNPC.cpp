@@ -291,68 +291,13 @@ bool AGridNPC::FindEntryCell(const FVector& FromWorld, FIntPoint& OutCell) const
 		return false;
 	}
 
-	const FIntPoint SpawnCell = Grid->WorldToCell(FromWorld);
-	if (Grid->CanPawnEnter(SpawnCell, this))
-	{
-		OutCell = SpawnCell;
-		return true;
-	}
+	// 진입 규칙은 그리드가 소유한다. 행인, 엘리베이터에서 내리는 폰, 열차에서 내리는 폰이
+	// 같은 상황(셀이 없는 자리에서 걸어 들어오기)이라 답도 같아야 한다.
+	const TOptional<FIntPoint> Goal = Waypoints.IsEmpty()
+		? TOptional<FIntPoint>()
+		: TOptional<FIntPoint>(Waypoints[0]);
 
-	const bool bHasGoal = !Waypoints.IsEmpty();
-	const FIntPoint FirstGoal = bHasGoal ? Waypoints[0] : FIntPoint::ZeroValue;
-
-	// AGridActor::FindNearestWalkableCell을 쓰지 않는 이유가 둘 있다. 그 함수는 링 스캔에서
-	// 처음 걸린 셀을 돌려주므로 실제로 가장 가까운 셀이 아닐 수 있고, 경로가 없는 섬으로
-	// 들어가 버릴 수도 있다. 여기서는 후보가 처음 나온 반경 안에서 월드 거리로 가장 가깝고
-	// 첫 경유 셀까지 길이 있는 셀을 고른다.
-	for (int32 Radius = 1; Radius <= EntrySearchRadius; ++Radius)
-	{
-		FIntPoint Best = FIntPoint::ZeroValue;
-		double BestDistanceSq = TNumericLimits<double>::Max();
-		bool bFound = false;
-
-		for (int32 OffsetY = -Radius; OffsetY <= Radius; ++OffsetY)
-		{
-			for (int32 OffsetX = -Radius; OffsetX <= Radius; ++OffsetX)
-			{
-				if (FMath::Max(FMath::Abs(OffsetX), FMath::Abs(OffsetY)) != Radius)
-				{
-					continue;	// 링 안쪽은 더 작은 반경에서 이미 다뤘다
-				}
-
-				const FIntPoint Candidate(SpawnCell.X + OffsetX, SpawnCell.Y + OffsetY);
-				if (!Grid->CanPawnEnter(Candidate, this))
-				{
-					continue;
-				}
-
-				if (bHasGoal && Candidate != FirstGoal)
-				{
-					TArray<FIntPoint> Probe;
-					if (!Grid->FindPath(Candidate, FirstGoal, this, Probe))
-					{
-						continue;
-					}
-				}
-
-				const double DistanceSq = FVector::DistSquared2D(Grid->CellToWorld(Candidate), FromWorld);
-				if (DistanceSq < BestDistanceSq)
-				{
-					BestDistanceSq = DistanceSq;
-					Best = Candidate;
-					bFound = true;
-				}
-			}
-		}
-
-		if (bFound)
-		{
-			OutCell = Best;
-			return true;
-		}
-	}
-
-	return false;
+	return Grid->FindEntryCell(FromWorld, EntrySearchRadius, this, Goal, OutCell);
 }
 
 bool AGridNPC::PlanRoute(FIntPoint FromCell, int32 FirstWaypoint, TArray<FIntPoint>& OutPath) const

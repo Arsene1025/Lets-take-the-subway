@@ -8,9 +8,11 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleElevatorBlock.h"
+#include "Puzzle/PuzzleElevatorDock.h"
 #include "Puzzle/PuzzleLever.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Vehicle/GridTrain.h"
 
 #include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
@@ -161,6 +163,20 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 			return Pick;
 		}
 
+		// 열차는 문이 열려 있고 폰이 그 문 앞에 서 있을 때만 잡는다. 그 밖의 경우에는
+		// 없는 셈 치고 뒤쪽 바닥을 클릭하게 둔다 -- 차체가 승강장 셀을 통째로 가리기 때문이다.
+		if (AGridTrain* Train = Cast<AGridTrain>(Hit.GetActor()))
+		{
+			if (Train->CanBoard(GetGridPawn()))
+			{
+				Pick.Kind = FCursorPick::EKind::Vehicle;
+				Pick.Vehicle = Train;
+				Pick.Cell = Grid->WorldToCell(Hit.Location);
+				Pick.HitLocation = Hit.Location;
+				return Pick;
+			}
+		}
+
 		// 윗면만 잡힌다. 블록의 옆면은 카메라를 향해 서서 그 뒤의 바닥을 가로막고
 		// 있으므로, 옆면 히트를 그랩으로 취급하면 그 셀들은 클릭으로 갈 수 없게
 		// 된다.
@@ -269,6 +285,26 @@ void AGridPlayerController::OnPressed()
 		return;
 	}
 
+	if (Pick.Kind == FCursorPick::EKind::Vehicle)
+	{
+		AGridTrain* Train = Pick.Vehicle.Get();
+		if (!Train)
+		{
+			return;
+		}
+
+		FText Reason;
+		if (Train->TryBoard(GridPawn, &Reason))
+		{
+			ShowFeedback(TEXT("You board the train."), FLinearColor(0.45f, 0.85f, 1.0f));
+		}
+		else
+		{
+			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+		return;
+	}
+
 	if (Pick.Kind == FCursorPick::EKind::Block)
 	{
 		APuzzleBlock* Block = Pick.Block.Get();
@@ -291,6 +327,17 @@ void AGridPlayerController::OnPressed()
 
 	if (Pick.Kind == FCursorPick::EKind::Floor)
 	{
+		// 바로 옆 칸이 막혀 있는데 클릭했다면 폰을 그쪽으로 살짝 부딪히게 한다. 기획의
+		// "좁은 곳을 지나가려 할 때 지나갈 수 없다는 걸 보여 주는 연출"이다. 한 칸 떨어진
+		// 곳만 대상으로 하는 이유는, 먼 셀을 클릭한 것은 길이 없다는 안내로 충분하기 때문이다.
+		const FIntPoint Delta = Pick.Cell - GridPawn->GetCurrentCell();
+		const bool bAdjacent = (FMath::Abs(Delta.X) + FMath::Abs(Delta.Y)) == 1;
+
+		if (bAdjacent && !GridPawn->IsMoving() && !Grid->CanPawnEnter(Pick.Cell, GridPawn))
+		{
+			GridPawn->Bump(Pick.Cell);
+		}
+
 		GridPawn->RequestMoveToCell(Pick.Cell);
 		return;
 	}
@@ -538,7 +585,24 @@ void AGridPlayerController::FinishDrag()
 	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
 	{
 		FText Reason;
-		if (Elevator->TryBoard(GetGridPawn(), &Reason))
+		if (!Elevator->TryBoard(GetGridPawn(), &Reason))
+		{
+			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+			return;
+		}
+
+		// 탑승은 문 앞에 섰다는 확인일 뿐이다. 실제로 층을 옮기는 것은 차체 아래의 구조물이며,
+		// 구조물 위가 아니면 차체는 그냥 밀 수 있는 상자다.
+		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+		APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
+
+		if (!Dock)
+		{
+			ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
+			return;
+		}
+
+		if (Dock->TryLaunch(GetGridPawn(), &Reason))
 		{
 			ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
 		}

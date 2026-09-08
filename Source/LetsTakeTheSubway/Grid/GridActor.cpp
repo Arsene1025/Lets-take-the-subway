@@ -261,6 +261,69 @@ bool AGridActor::FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const 
 	return false;
 }
 
+bool AGridActor::FindEntryCell(const FVector& FromWorld, int32 MaxRadius, const APawn* Pawn,
+	const TOptional<FIntPoint>& Goal, FIntPoint& OutCell) const
+{
+	const FIntPoint FromCell = WorldToCell(FromWorld);
+	if (CanPawnEnter(FromCell, Pawn))
+	{
+		OutCell = FromCell;
+		return true;
+	}
+
+	for (int32 Radius = 1; Radius <= MaxRadius; ++Radius)
+	{
+		FIntPoint Best = FIntPoint::ZeroValue;
+		double BestDistanceSq = TNumericLimits<double>::Max();
+		bool bFound = false;
+
+		for (int32 OffsetY = -Radius; OffsetY <= Radius; ++OffsetY)
+		{
+			for (int32 OffsetX = -Radius; OffsetX <= Radius; ++OffsetX)
+			{
+				if (FMath::Max(FMath::Abs(OffsetX), FMath::Abs(OffsetY)) != Radius)
+				{
+					continue;	// 링 안쪽은 더 작은 반경에서 이미 다뤘다
+				}
+
+				const FIntPoint Candidate(FromCell.X + OffsetX, FromCell.Y + OffsetY);
+				if (!CanPawnEnter(Candidate, Pawn))
+				{
+					continue;
+				}
+
+				// 목적지가 있으면 거기까지 이어지는 셀만 받는다. 그러지 않으면 선로 건너편
+				// 같은 고립된 섬으로 걸어 들어가 영영 못 나온다.
+				if (Goal.IsSet() && Candidate != Goal.GetValue())
+				{
+					TArray<FIntPoint> Probe;
+					if (!FindPath(Candidate, Goal.GetValue(), Pawn, Probe))
+					{
+						continue;
+					}
+				}
+
+				const double DistanceSq = FVector::DistSquared2D(CellToWorld(Candidate), FromWorld);
+				if (DistanceSq < BestDistanceSq)
+				{
+					BestDistanceSq = DistanceSq;
+					Best = Candidate;
+					bFound = true;
+				}
+			}
+		}
+
+		// 한 반경 안에서 최선을 고르고 끝낸다. 더 넓은 링에는 더 가까운 셀이 있을 수 없다.
+		if (bFound)
+		{
+			OutCell = Best;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool AGridActor::FindPath(FIntPoint Start, FIntPoint Goal, const APawn* Pawn, TArray<FIntPoint>& OutPath) const
 {
 	return FGridPathfinder::FindPath(*this, Start, Goal, Pawn, OutPath);
