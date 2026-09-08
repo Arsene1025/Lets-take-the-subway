@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Grid/GridDebug.h"
 
@@ -17,7 +17,7 @@ TAutoConsoleVariable<int32> CVarGridDebug(
 
 namespace
 {
-	// Arbitrary but stable ids so each overlay can be cleared without touching the other.
+	// 임의지만 고정된 id. 각 오버레이를 다른 쪽에 손대지 않고 지울 수 있다.
 	constexpr uint32 PathBatchID = 0x4C545301;
 	constexpr uint32 HoverBatchID = 0x4C545302;
 

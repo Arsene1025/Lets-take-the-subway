@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Authoring/GridCellMarker.h"
 
@@ -43,9 +43,9 @@ void AGridCellMarkerBase::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// bIsEditorOnlyActor keeps these out of a cooked build, but PIE duplicates the editor
-	// level as-is. Destroying them here makes "markers never affect runtime" absolute
-	// rather than a convention.
+	// bIsEditorOnlyActor가 쿡된 빌드에서는 이들을 걸러 주지만, PIE는 에디터 레벨을 그대로
+	// 복제한다. 여기서 파괴해 두면 "마커는 런타임에 절대 영향을 주지 않는다"가 관례가
+	// 아니라 보장이 된다.
 	if (UWorld* World = GetWorld())
 	{
 		if (World->IsGameWorld())
@@ -63,7 +63,7 @@ void AGridCellMarkerBase::PostEditMove(bool bFinished)
 
 	if (!bFinished)
 	{
-		return;		// snapping mid-drag fights the gizmo
+		return;		// 드래그 도중 스냅하면 기즈모와 충돌한다
 	}
 
 	if (const AGridActor* Grid = AGridActor::FindGrid(GetWorld()))
@@ -101,7 +101,7 @@ void AGridCellMarkerBase::SnapToGrid(const AGridActor& Grid)
 	const FIntPoint Cell = Grid.WorldToCell(GetActorLocation());
 	if (!Grid.IsValidCell(Cell))
 	{
-		return;		// dragged outside the grid; leave it where it is so it can be dragged back
+		return;		// 그리드 밖으로 드래그됨; 다시 끌어올 수 있도록 그 자리에 둔다
 	}
 
 	const FVector Target = Grid.CellToWorld(Cell) + FVector(0.0, 0.0, 10.0);
@@ -114,8 +114,8 @@ void AGridCellMarkerBase::NotifyGrid()
 {
 	UWorld* World = GetWorld();
 
-	// Destroyed() also fires while a level is being torn down or garbage collected. Baking
-	// then would iterate half-destroyed actors, so only react in a live editor world.
+	// Destroyed()는 레벨이 내려가거나 가비지 컬렉션 중에도 호출된다. 그때 구우면
+	// 반쯤 파괴된 액터를 순회하게 되므로, 살아 있는 에디터 월드에서만 반응한다.
 	if (!World || World->WorldType != EWorldType::Editor || World->bIsTearingDown || IsGarbageCollecting())
 	{
 		return;
@@ -138,7 +138,7 @@ void AGridCellMarkerBase::UpdateVisual()
 
 #endif	// WITH_EDITOR
 
-// ---------------------------------------------------------------------------- Single cell
+// ---------------------------------------------------------------------------- 단일 셀
 
 AGridCellMarker::AGridCellMarker()
 {
@@ -157,7 +157,7 @@ void AGridCellMarker::GatherCells(const AGridActor& Grid, TArray<FIntPoint>& Out
 	}
 }
 
-// ---------------------------------------------------------------------------- Box of cells
+// ---------------------------------------------------------------------------- 셀 박스
 
 AGridBoxMarker::AGridBoxMarker()
 {
@@ -169,9 +169,9 @@ AGridBoxMarker::AGridBoxMarker()
 
 FIntPoint AGridBoxMarker::GetMinCell(const AGridActor& Grid) const
 {
-	// The actor sits at the centre of the covered rectangle, so step back half of it to
-	// find the min corner. The +0.25 cell nudge keeps an exactly-on-the-boundary centre
-	// from floor()ing one cell too low.
+	// 액터는 덮는 직사각형의 중심에 있으므로, 절반만큼 되돌아가면 최소 모서리가 나온다.
+	// +0.25 셀만큼 밀어 두는 건 중심이 정확히 경계 위에 있을 때 floor()가 한 셀 낮게
+	// 떨어지는 걸 막기 위해서다.
 	const FVector HalfSpan(
 		SizeInCells.X * Grid.CellSize * 0.5,
 		SizeInCells.Y * Grid.CellSize * 0.5,
@@ -202,8 +202,8 @@ void AGridBoxMarker::GatherCells(const AGridActor& Grid, TArray<FIntPoint>& OutC
 
 void AGridBoxMarker::SnapToGrid(const AGridActor& Grid)
 {
-	// Snap so the rectangle's edges land on cell borders: with an even cell count the
-	// centre falls on a border, with an odd count it falls on a cell centre.
+	// 직사각형의 가장자리가 셀 경계에 오도록 스냅한다: 셀 수가 짝수면 중심이 경계 위에,
+	// 홀수면 셀 중심 위에 온다.
 	const FIntPoint MinCell = GetMinCell(Grid);
 	if (!Grid.IsValidCell(MinCell))
 	{

@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -12,14 +12,14 @@ class UBoxComponent;
 class UGridCellRule;
 
 /**
- * Editor-only override placed on top of the auto-generated grid.
+ * 자동 생성된 그리드 위에 얹는 에디터 전용 오버라이드.
  *
- * Drop one in the level, drag it where you want it (it snaps to the nearest cell) and pick
- * a cell type. The grid re-bakes its overrides as soon as the marker moves or changes, so
- * the viewport preview stays truthful.
+ * 레벨에 하나 놓고 원하는 위치로 드래그한 뒤(가장 가까운 셀에 스냅된다) 셀 타입을
+ * 고른다. 마커가 움직이거나 바뀌는 즉시 그리드가 오버라이드를 다시 굽기 때문에
+ * 뷰포트 미리보기가 항상 실제와 일치한다.
  *
- * Markers are stripped on cook. What survives is the baked FGridCellOverride array on the
- * grid actor, plus a copy of any rule object -- see AGridActor::BakeOverridesFromMarkers.
+ * 마커는 쿡 시 제거된다. 남는 것은 그리드 액터에 구운 FGridCellOverride 배열과
+ * 룰 오브젝트의 복사본이다 -- AGridActor::BakeOverridesFromMarkers 참고.
  */
 UCLASS(Abstract, HideCategories = (Rendering, Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, WorldPartition, Replication))
 class LETSTAKETHESUBWAY_API AGridCellMarkerBase : public AActor
@@ -29,23 +29,23 @@ class LETSTAKETHESUBWAY_API AGridCellMarkerBase : public AActor
 public:
 	AGridCellMarkerBase();
 
-	/** What the covered cells become. NoFloor is a generated state and cannot be authored. */
+	/** 덮은 셀이 어떤 타입이 될지. NoFloor는 생성 결과 상태라 직접 지정할 수 없다. */
 	UPROPERTY(EditAnywhere, Category = "Grid Override", meta = (InvalidEnumValues = "NoFloor"))
 	EGridCellType CellType = EGridCellType::Blocked;
 
-	/** Runtime entry test. Only meaningful for Conditional cells. */
+	/** 런타임 진입 판정. Conditional 셀에서만 의미가 있다. */
 	UPROPERTY(EditAnywhere, Instanced, Category = "Grid Override",
 		meta = (EditCondition = "CellType == EGridCellType::Conditional", EditConditionHides))
 	TObjectPtr<UGridCellRule> Rule;
 
-	/** When markers overlap, the higher priority wins. */
+	/** 마커가 겹치면 Priority가 높은 쪽이 이긴다. */
 	UPROPERTY(EditAnywhere, Category = "Grid Override")
 	int32 Priority = 0;
 
-	/** Cells this marker covers, in grid coordinates. */
+	/** 이 마커가 덮는 셀들, 그리드 좌표 기준. */
 	virtual void GatherCells(const AGridActor& Grid, TArray<FIntPoint>& OutCells) const PURE_VIRTUAL(AGridCellMarkerBase::GatherCells, );
 
-	/** Single-cell markers win ties against box markers -- a small fix on a broad region. */
+	/** 단일 셀 마커는 박스 마커와 비길 때 이긴다 -- 넓은 영역 위에 작은 수정을 얹는 용도다. */
 	virtual bool IsSingleCellMarker() const { return true; }
 
 	virtual void BeginPlay() override;
@@ -56,13 +56,13 @@ public:
 	virtual void PostEditUndo() override;
 	virtual void Destroyed() override;
 
-	/** Move onto the grid so the covered cells are unambiguous. */
+	/** 덮는 셀이 모호하지 않도록 그리드 위로 옮긴다. */
 	virtual void SnapToGrid(const AGridActor& Grid);
 
-	/** Tell every grid in the level to re-bake. */
+	/** 레벨의 모든 그리드에 다시 구우라고 알린다. */
 	void NotifyGrid();
 
-	/** Recolour the box to match CellType. */
+	/** CellType에 맞게 박스 색을 바꾼다. */
 	void UpdateVisual();
 #endif
 
@@ -71,7 +71,7 @@ protected:
 	TObjectPtr<UBoxComponent> Box;
 };
 
-/** Overrides exactly the cell under the actor. */
+/** 액터 바로 아래의 셀 하나만 오버라이드한다. */
 UCLASS(meta = (DisplayName = "Grid Cell Marker"))
 class LETSTAKETHESUBWAY_API AGridCellMarker : public AGridCellMarkerBase
 {
@@ -84,10 +84,10 @@ public:
 };
 
 /**
- * Overrides a rectangle of cells.
+ * 직사각형 범위의 셀을 오버라이드한다.
  *
- * Size is in cells rather than world scale on purpose: a scaled box has float edges, which
- * makes "is this cell half covered?" a judgement call and the bake non-deterministic.
+ * 크기를 월드 스케일이 아니라 셀 수로 두는 건 의도적이다: 스케일된 박스는 가장자리가
+ * 실수 값이라 "이 셀이 반만 덮였나?"가 판단 문제가 되고 굽기 결과가 비결정적이 된다.
  */
 UCLASS(meta = (DisplayName = "Grid Box Marker"))
 class LETSTAKETHESUBWAY_API AGridBoxMarker : public AGridCellMarkerBase
@@ -109,6 +109,6 @@ public:
 #endif
 
 private:
-	/** Min-corner cell of the covered rectangle, derived from the actor location. */
+	/** 덮는 직사각형의 최소 모서리 셀. 액터 위치에서 계산한다. */
 	FIntPoint GetMinCell(const AGridActor& Grid) const;
 };

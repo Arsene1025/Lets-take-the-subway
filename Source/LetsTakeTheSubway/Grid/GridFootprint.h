@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -6,11 +6,11 @@
 #include "Grid/GridActor.h"
 
 /**
- * A rectangle of cells: the shape a marker, a puzzle block or a rotation tile covers.
+ * 셀의 사각 영역: 마커, 퍼즐 블록, 회전 타일이 덮는 모양이다.
  *
- * Min is the low corner and Size is a count, so the rectangle spans
- * [Min, Min + Size) on both axes and an empty rectangle is impossible to express by
- * accident.
+ * Min은 낮은 쪽 모서리이고 Size는 개수이므로, 사각 영역은 두 축 모두
+ * [Min, Min + Size) 범위를 차지하며 빈 사각 영역을 실수로 표현하는 일은
+ * 불가능하다.
  */
 struct FGridRect
 {
@@ -20,10 +20,10 @@ struct FGridRect
 	FGridRect() = default;
 	FGridRect(FIntPoint InMin, FIntPoint InSize) : Min(InMin), Size(InSize) {}
 
-	/** One past the high corner, matching the half-open span. */
+	/** 높은 쪽 모서리 바로 다음. 반열린 범위와 짝을 이룬다. */
 	FIntPoint MaxExclusive() const { return Min + Size; }
 
-	/** The high corner itself -- the last cell actually covered. */
+	/** 높은 쪽 모서리 그 자체 -- 실제로 덮이는 마지막 셀. */
 	FIntPoint MaxInclusive() const { return Min + Size - FIntPoint(1, 1); }
 
 	bool Contains(FIntPoint Cell) const
@@ -62,17 +62,17 @@ struct FGridRect
 };
 
 /**
- * Cell-rectangle placement and rotation maths, shared by the box marker and the puzzle
- * actors so they all agree on where an actor sitting at a footprint's centre actually is.
+ * 셀 사각 영역의 배치·회전 계산. 박스 마커와 퍼즐 액터들이 공유해, 풋프린트 중심에 놓인
+ * 액터가 실제로 어디에 있는지에 대해 모두 같은 답을 내게 한다.
  */
 namespace GridFootprint
 {
 	/**
-	 * Min corner cell of a rectangle whose centre is at Centre.
+	 * 중심이 Centre에 있는 사각 영역의 Min 모서리 셀.
 	 *
-	 * The quarter-cell nudge keeps a centre that lands exactly on a cell boundary from
-	 * flooring one cell too low. Same rule as AGridBoxMarker::GetMinCell, which this
-	 * replaces.
+	 * 4분의 1 셀만큼 밀어 주는 것은, 정확히 셀 경계에 떨어진 중심이 한 셀 낮게 내림되는
+	 * 것을 막기 위해서다. 이 함수가 대체하는 AGridBoxMarker::GetMinCell과 같은
+	 * 규칙이다.
 	 */
 	inline FIntPoint MinCellFromCentre(const AGridActor& Grid, const FVector& Centre, FIntPoint Size)
 	{
@@ -81,7 +81,7 @@ namespace GridFootprint
 		return Grid.WorldToCell(Centre - HalfSpan + Nudge);
 	}
 
-	/** World centre of a rectangle, at the given height. Inverse of MinCellFromCentre. */
+	/** 주어진 높이에서의 사각 영역 월드 중심. MinCellFromCentre의 역함수다. */
 	inline FVector CentreFromMinCell(const AGridActor& Grid, FIntPoint Min, FIntPoint Size, double Z)
 	{
 		const FVector Origin = Grid.GetGridOrigin();
@@ -92,11 +92,11 @@ namespace GridFootprint
 	}
 
 	/**
-	 * Rotate a cell within an N x N region, in region-local coordinates.
+	 * N x N 영역 안의 셀을 영역 로컬 좌표로 회전한다.
 	 *
-	 * One positive turn is +90 degrees of yaw. Working from cell centres, local cell l maps
-	 * to N/2 + Rot90(l + 0.5 - N/2) - 0.5, which reduces to (N-1-l.y, l.x). For N = 4 that
-	 * sends (3,3) to (0,3): the corner that was at max X, max Y ends at max X, min Y.
+	 * 양의 한 번 회전은 요 +90도다. 셀 중심 기준으로 계산하면 로컬 셀 l은
+	 * N/2 + Rot90(l + 0.5 - N/2) - 0.5로 가고, 이는 (N-1-l.y, l.x)로 정리된다. N = 4면
+	 * (3,3)이 (0,3)으로 간다: 최대 X, 최대 Y에 있던 모서리가 최대 X, 최소 Y에서 끝난다.
 	 */
 	inline FIntPoint RotateLocalCell(FIntPoint Local, int32 RegionSize, int32 QuarterTurns)
 	{
@@ -110,11 +110,11 @@ namespace GridFootprint
 	}
 
 	/**
-	 * Rotate a rectangle inside a square region.
+	 * 정사각 영역 안에서 사각 영역을 회전한다.
 	 *
-	 * Both extreme corners are mapped and recombined rather than deriving the min corner
-	 * analytically: the two corners swap roles on odd turns, and taking the component-wise
-	 * minimum is correct for every turn count without a special case.
+	 * Min 모서리를 해석적으로 유도하는 대신 양 끝 모서리를 각각 변환한 뒤 다시 합친다:
+	 * 홀수 번 회전에서는 두 모서리의 역할이 뒤바뀌는데, 성분별 최솟값을 취하면 특수 처리
+	 * 없이 어떤 회전 횟수에서도 올바르다.
 	 */
 	inline FGridRect RotateRect(const FGridRect& Rect, const FGridRect& Region, int32 QuarterTurns)
 	{
