@@ -5,6 +5,7 @@
 #include "LetsTakeTheSubway.h"
 #include "Grid/GridActor.h"
 #include "Grid/GridDebug.h"
+#include "Vehicle/GridEscalator.h"
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleElevatorBlock.h"
@@ -177,17 +178,42 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 			}
 		}
 
-		// 윗면만 잡힌다. 블록의 옆면은 카메라를 향해 서서 그 뒤의 바닥을 가로막고
-		// 있으므로, 옆면 히트를 그랩으로 취급하면 그 셀들은 클릭으로 갈 수 없게
-		// 된다.
+		// 에스컬레이터는 엘리베이터와 같은 규칙이다: 어느 면을 눌러도 잡히고, 지금 탈 수 없으면
+		// 왜 안 되는지 알려 준다. 열차처럼 없는 셈 치고 넘기면 반대쪽 끝에서 눌렀을 때 아무
+		// 말도 없이 폰이 엉뚱한 바닥으로 걸어가 버린다 -- 거부 이유가 영영 화면에 닿지 않는다.
+		if (AGridEscalator* Escalator = Cast<AGridEscalator>(Hit.GetActor()))
+		{
+			Pick.Kind = FCursorPick::EKind::Escalator;
+			Pick.Escalator = Escalator;
+			Pick.Cell = Grid->WorldToCell(Hit.Location);
+			Pick.HitLocation = Hit.Location;
+			return Pick;
+		}
+
+		// 블록은 어느 면으로든 잡힌다. 옆면이 그 뒤의 바닥을 가로막는 것은 여전하지만,
+		// 이제 그 셀은 블록을 클릭해서 갈 수 있다: 블록 픽이 FloorCell을 함께 들고 간다.
+		//
+		// --- TOP-FACE-ONLY PICK DISABLED 2026-09-08 ---
+		// 예전에는 윗면 히트만 잡기로 쳤다. 옆면 히트를 그랩으로 취급하면 그 뒤 셀을
+		// 영영 클릭할 수 없었기 때문인데, 대신 옆면을 잡으려다 폰이 걸어가 버렸다.
+		// 되살리려면 아래 #if 0을 1로 바꾸고 HandleBlockClick의 바닥 이동 분기를 지운다.
 		if (APuzzleBlock* Block = Cast<APuzzleBlock>(Hit.GetActor()))
 		{
+#if 0
 			if (Hit.ImpactNormal.Z > 0.7)
+#endif
 			{
 				Pick.Kind = FCursorPick::EKind::Block;
 				Pick.Block = Block;
 				Pick.Cell = Grid->WorldToCell(Hit.Location);
 				Pick.HitLocation = Hit.Location;
+
+				// 이 누름이 드래그가 아니라 클릭으로 끝날 때 폰이 갈 곳. 누른 뒤에 구하면
+				// 커서가 이미 움직였을 수 있으므로 픽과 같은 레이로 지금 구해 둔다.
+				FVector FloorLocation;
+				Pick.bHasFloorCell = TraceFloorIgnoringBlocks(
+					WorldOrigin, RayEnd, Params, Pick.FloorCell, FloorLocation);
+
 				return Pick;
 			}
 		}
@@ -196,6 +222,34 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 	// 모든 블록을 무시한 두 번째 패스. 옆면 히트든, 빗나감이든, 배경 히트든 똑같이
 	// 돌려서 바닥 판정이 첫 레이가 우연히 무엇에 닿았느냐가 아니라 하나의 규칙으로
 	// 나오게 한다.
+	FVector FloorLocation;
+	FIntPoint FloorCell;
+	if (!TraceFloorIgnoringBlocks(WorldOrigin, RayEnd, Params, FloorCell, FloorLocation))
+	{
+		return Pick;
+	}
+
+	Pick.Kind = FCursorPick::EKind::Floor;
+	Pick.Cell = FloorCell;
+	Pick.HitLocation = FloorLocation;
+	return Pick;
+}
+
+bool AGridPlayerController::TraceFloorIgnoringBlocks(
+	const FVector& RayOrigin,
+	const FVector& RayEnd,
+	FCollisionQueryParams Params,
+	FIntPoint& OutCell,
+	FVector& OutHitLocation) const
+{
+	const AGridActor* Grid = GetGrid();
+	if (!Grid)
+	{
+		return false;
+	}
+
+	// Params를 값으로 받는다: 여기서 더한 무시 목록이 호출자의 1차 트레이스 설정에
+	// 남지 않아야 한다.
 	TArray<AActor*> BlockActors;
 	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
 	{
@@ -204,21 +258,20 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 	Params.AddIgnoredActors(BlockActors);
 
 	FHitResult FloorHit;
-	if (!GetWorld()->LineTraceSingleByChannel(FloorHit, WorldOrigin, RayEnd, Grid->TraceChannel, Params))
+	if (!GetWorld()->LineTraceSingleByChannel(FloorHit, RayOrigin, RayEnd, Grid->TraceChannel, Params))
 	{
-		return Pick;
+		return false;
 	}
 
 	const FIntPoint Cell = Grid->WorldToCell(FloorHit.Location);
 	if (!Grid->IsValidCell(Cell))
 	{
-		return Pick;
+		return false;
 	}
 
-	Pick.Kind = FCursorPick::EKind::Floor;
-	Pick.Cell = Cell;
-	Pick.HitLocation = FloorHit.Location;
-	return Pick;
+	OutCell = Cell;
+	OutHitLocation = FloorHit.Location;
+	return true;
 }
 
 void AGridPlayerController::OnPressed()
@@ -305,50 +358,207 @@ void AGridPlayerController::OnPressed()
 		return;
 	}
 
-	if (Pick.Kind == FCursorPick::EKind::Block)
+	if (Pick.Kind == FCursorPick::EKind::Escalator)
 	{
-		APuzzleBlock* Block = Pick.Block.Get();
-		if (!Block)
+		AGridEscalator* Escalator = Pick.Escalator.Get();
+		if (!Escalator)
 		{
 			return;
 		}
 
-		// 블록이 움직일 수 없더라도 일단 쥔다: 이동 없이 떼면 클릭이고, 엘리베이터는
-		// 그렇게 탑승한다.
-		DraggedBlock = Block;
-		GrabPoint = Pick.HitLocation;
-		GrabOffset = Pick.HitLocation - Block->GetActorLocation();
-		DragAxis = Block->GetWorldMoveAxis();
-		bHasRefusedDir = false;
-		StepsThisDrag = 0;
-		Block->SetHeld(true);
+		FText Reason;
+		if (Escalator->TryBoard(GridPawn, &Reason))
+		{
+			ShowFeedback(TEXT("You step onto the escalator."), FLinearColor(0.45f, 0.85f, 1.0f));
+		}
+		else
+		{
+			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+		return;
+	}
+
+	if (Pick.Kind == FCursorPick::EKind::Block)
+	{
+		if (!Pick.Block.IsValid())
+		{
+			return;
+		}
+
+		// 아직 쥐지 않는다. 이 누름이 블록을 밀라는 뜻인지 그 뒤 바닥으로 걸어가라는
+		// 뜻인지는 커서가 움직여 봐야 알 수 있다.
+		FVector2D MousePosition;
+		if (!GetMousePosition(MousePosition.X, MousePosition.Y))
+		{
+			return;
+		}
+
+		PressPick = Pick;
+		PressScreenPosition = MousePosition;
+		bPressPending = true;
 		return;
 	}
 
 	if (Pick.Kind == FCursorPick::EKind::Floor)
 	{
-		// 바로 옆 칸이 막혀 있는데 클릭했다면 폰을 그쪽으로 살짝 부딪히게 한다. 기획의
-		// "좁은 곳을 지나가려 할 때 지나갈 수 없다는 걸 보여 주는 연출"이다. 한 칸 떨어진
-		// 곳만 대상으로 하는 이유는, 먼 셀을 클릭한 것은 길이 없다는 안내로 충분하기 때문이다.
-		const FIntPoint Delta = Pick.Cell - GridPawn->GetCurrentCell();
-		const bool bAdjacent = (FMath::Abs(Delta.X) + FMath::Abs(Delta.Y)) == 1;
-
-		if (bAdjacent && !GridPawn->IsMoving() && !Grid->CanPawnEnter(Pick.Cell, GridPawn))
-		{
-			GridPawn->Bump(Pick.Cell);
-		}
-
-		GridPawn->RequestMoveToCell(Pick.Cell);
+		// 바닥에는 끌 것이 없으므로 누르는 즉시 처리한다. 뗄 때까지 기다리면 응답만 늦다.
+		MovePawnToCell(Pick.Cell);
 		return;
 	}
 
 	ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
 }
 
+void AGridPlayerController::MovePawnToCell(const FIntPoint& Cell)
+{
+	AGridActor* Grid = GetGrid();
+	AGridPawn* GridPawn = GetGridPawn();
+
+	if (!Grid || !GridPawn)
+	{
+		return;
+	}
+
+	// 바로 옆 칸이 막혀 있는데 클릭했다면 폰을 그쪽으로 살짝 부딪히게 한다. 기획의
+	// "좁은 곳을 지나가려 할 때 지나갈 수 없다는 걸 보여 주는 연출"이다. 한 칸 떨어진
+	// 곳만 대상으로 하는 이유는, 먼 셀을 클릭한 것은 길이 없다는 안내로 충분하기 때문이다.
+	const FIntPoint Delta = Cell - GridPawn->GetCurrentCell();
+	const bool bAdjacent = (FMath::Abs(Delta.X) + FMath::Abs(Delta.Y)) == 1;
+
+	if (bAdjacent && !GridPawn->IsMoving() && !Grid->CanPawnEnter(Cell, GridPawn))
+	{
+		GridPawn->Bump(Cell);
+	}
+
+	GridPawn->RequestMoveToCell(Cell);
+}
+
 void AGridPlayerController::OnReleased()
 {
 	FinishLeverDrag();
 	FinishDrag();
+
+	// 드래그로 넘어가지 못한 누름은 클릭이다.
+	if (bPressPending)
+	{
+		bPressPending = false;
+		HandleBlockClick(PressPick);
+	}
+}
+
+void AGridPlayerController::UpdatePendingPress()
+{
+	// 누른 뒤에 블록이 사라졌다면(퍼즐 리셋 등) 판정할 것이 없다.
+	if (!PressPick.Block.IsValid())
+	{
+		bPressPending = false;
+		return;
+	}
+
+	// 버튼을 누른 채 커서가 뷰포트를 벗어나면 뗌 이벤트가 유실된다. 그런 누름은 클릭도
+	// 드래그도 아닌 것으로 버린다: 커서가 어디서 떨어졌는지 모르는 채 폰을 보내면 안 된다.
+	if (!IsInputKeyDown(EKeys::LeftMouseButton))
+	{
+		bPressPending = false;
+		return;
+	}
+
+	FVector2D MousePosition;
+	if (!GetMousePosition(MousePosition.X, MousePosition.Y))
+	{
+		return;
+	}
+
+	if (FVector2D::Distance(MousePosition, PressScreenPosition) < DragStartThresholdPixels)
+	{
+		return;
+	}
+
+	bPressPending = false;
+
+	// 누른 뒤에 조각이 움직이기 시작했을 수 있다. 그때는 이 제스처를 버린다.
+	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		if (Subsystem->IsInputLocked())
+		{
+			return;
+		}
+	}
+
+	BeginBlockDrag(PressPick);
+}
+
+void AGridPlayerController::BeginBlockDrag(const FCursorPick& Pick)
+{
+	APuzzleBlock* Block = Pick.Block.Get();
+	if (!Block)
+	{
+		return;
+	}
+
+	// 블록이 움직일 수 없더라도 쥔다: 떼는 순간 왜 안 움직이는지 알려 주기 위해서다.
+	//
+	// 잡는 지점은 커서의 현재 위치가 아니라 **누른 순간**의 히트 지점이다. 그래야 판정
+	// 문턱을 넘느라 움직인 몇 픽셀만큼 블록이 손에서 미끄러지지 않는다.
+	DraggedBlock = Block;
+	GrabPoint = Pick.HitLocation;
+	GrabOffset = Pick.HitLocation - Block->GetActorLocation();
+	DragAxis = Block->GetWorldMoveAxis();
+	bHasRefusedDir = false;
+	StepsThisDrag = 0;
+	Block->SetHeld(true);
+}
+
+void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
+{
+	APuzzleBlock* Block = Pick.Block.Get();
+	if (!Block)
+	{
+		return;
+	}
+
+	// 엘리베이터만은 클릭에 고유한 뜻이 있다: 탑승. 차체가 곧 문이므로 그 위를 클릭하는
+	// 것을 뒤쪽 바닥으로 걸어가라는 뜻으로 읽을 수는 없다.
+	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
+	{
+		FText Reason;
+		if (!Elevator->TryBoard(GetGridPawn(), &Reason))
+		{
+			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+			return;
+		}
+
+		// 탑승은 문 앞에 섰다는 확인일 뿐이다. 실제로 층을 옮기는 것은 차체 아래의 구조물이며,
+		// 구조물 위가 아니면 차체는 그냥 밀 수 있는 상자다.
+		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+		APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
+
+		if (!Dock)
+		{
+			ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
+			return;
+		}
+
+		if (Dock->TryLaunch(GetGridPawn(), &Reason))
+		{
+			ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
+		}
+		else
+		{
+			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+		return;
+	}
+
+	// 그 밖의 블록 위 클릭은 그 블록이 없는 셈 치고 폰을 보낸다. 블록이 선 셀 자체를
+	// 클릭한 것이라면 기존 "Blocked by object" 거부가 그대로 나온다.
+	if (Pick.bHasFloorCell)
+	{
+		MovePawnToCell(Pick.FloorCell);
+		return;
+	}
+
+	ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
 }
 
 // ---------------------------------------------------------------------------- 레버 드래그
@@ -466,8 +676,8 @@ void AGridPlayerController::UpdateDrag()
 		return;		// 한 번에 한 셀; 스텝이 끝나기를 기다린다
 	}
 
-	// 드래그 한 번에 이동 한 번. 뗌이 클릭이 아니라 드래그로 읽히도록 블록은 계속 쥔
-	// 상태로 두되, 플레이어가 놓았다가 다시 잡기 전까지는 더 시도하지 않는다.
+	// 드래그 한 번에 이동 한 번. 블록은 계속 쥔 상태로 두되, 플레이어가 놓았다가 다시
+	// 잡기 전까지는 더 시도하지 않는다.
 	if (Block->bOneStepPerDrag && StepsThisDrag >= 1)
 	{
 		return;
@@ -475,7 +685,7 @@ void AGridPlayerController::UpdateDrag()
 
 	if (DragAxis == EPuzzleMoveAxis::None)
 	{
-		return;		// 움직일 수 없는 블록: 뗌이 클릭으로 등록되도록 쥐고만 있는다
+		return;		// 움직일 수 없는 블록: 뗄 때 왜 안 움직이는지 알려 주려고 쥐고만 있는다
 	}
 
 	FVector WorldOrigin;
@@ -575,41 +785,11 @@ void AGridPlayerController::FinishDrag()
 		return;		// 밀기였다; 회전 검사는 마지막 스텝이 끝날 때 발동한다
 	}
 
-	// 아무것도 움직이지 않은 누름은 조각을 클릭한 것이다.
+	// 여기까지 왔다면 드래그로 판정된 누름인데 블록이 한 칸도 가지 못한 것이다. 끌지 않은
+	// 누름은 클릭이므로 애초에 이 함수로 오지 않고 HandleBlockClick으로 간다.
 	if (Block->IsA<APuzzleRotatingObstacle>())
 	{
 		ShowFeedback(TEXT("This turns only when its lever is turned."), FLinearColor::White);
-		return;
-	}
-
-	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
-	{
-		FText Reason;
-		if (!Elevator->TryBoard(GetGridPawn(), &Reason))
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		// 탑승은 문 앞에 섰다는 확인일 뿐이다. 실제로 층을 옮기는 것은 차체 아래의 구조물이며,
-		// 구조물 위가 아니면 차체는 그냥 밀 수 있는 상자다.
-		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
-		APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
-
-		if (!Dock)
-		{
-			ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		if (Dock->TryLaunch(GetGridPawn(), &Reason))
-		{
-			ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
-		}
-		else
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-		}
 		return;
 	}
 
@@ -618,6 +798,16 @@ void AGridPlayerController::FinishDrag()
 		(Axis == EPuzzleMoveAxis::AxisX) ? TEXT("east and west") :
 		(Axis == EPuzzleMoveAxis::AxisY) ? TEXT("north and south") :
 		(Axis == EPuzzleMoveAxis::Both) ? TEXT("any direction") : TEXT("nowhere");
+
+	// 엘리베이터를 끌었지만 밀리지 않았다면, 탑승이 드래그가 아니라 클릭이라는 것부터
+	// 알려 주는 편이 낫다.
+	if (Block->IsA<APuzzleElevatorBlock>())
+	{
+		ShowFeedback(
+			FString::Printf(TEXT("This elevator moves %s. Click it to board."), AxisText),
+			FLinearColor::White);
+		return;
+	}
 
 	ShowFeedback(FString::Printf(TEXT("Drag to push. This block moves %s."), AxisText), FLinearColor::White);
 }
@@ -657,6 +847,12 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 		Subsystem->UpdateOcclusion(CameraLocation, GridPawn, SweepRadius);
 	}
 #endif
+
+	// 잡기보다 먼저 본다. 문턱을 넘는 프레임에 바로 드래그가 시작되도록.
+	if (bPressPending)
+	{
+		UpdatePendingPress();
+	}
 
 	if (DraggedLever.IsValid())
 	{

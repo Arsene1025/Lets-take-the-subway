@@ -9,6 +9,7 @@
 class AGridActor;
 class UCameraComponent;
 class USphereComponent;
+class USceneComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 
@@ -88,8 +89,12 @@ public:
 	 *
 	 * 순간이동이 아니라 걸어 들어가는 이유는, 그래야 어느 문으로 들어갔는지가 화면에
 	 * 보이고 탑승이 플레이어의 행동으로 읽히기 때문이다. 걷는 동안 조작은 잠긴다.
+	 *
+	 * FollowComponent를 주면 액터 원점 대신 그 컴포넌트를 따라간다. 에스컬레이터처럼 액터
+	 * 자체는 가만히 있고 그 위의 한 점만 움직이는 탈것을 위한 것이다. 비워 두면 지금까지처럼
+	 * 탈것 액터의 원점을 따라간다.
 	 */
-	void BoardVehicle(AActor* InVehicle, const FVector& SeatWorld);
+	void BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent = nullptr);
 
 	/**
 	 * 탈것에서 내려 그리드로 걸어 나온다.
@@ -158,6 +163,9 @@ private:
 	/** Riding: 위치를 탈것에 맞춘다. */
 	void TickRide(float DeltaSeconds);
 
+	/** 좌석 오프셋의 기준점. 앵커 컴포넌트가 있으면 그것, 없으면 탈것 액터의 원점이다. */
+	FVector RideBaseLocation() const;
+
 	void TickBump(float DeltaSeconds);
 
 	/** 그리드 위 한 셀씩 걷는 기존 루프. */
@@ -192,6 +200,9 @@ private:
 	ERideState RideState = ERideState::OnGrid;
 
 	TWeakObjectPtr<AActor> Vehicle;
+
+	/** 탈것 안에서 따라갈 지점 (있다면). 없으면 탈것 액터의 원점을 따른다. */
+	TWeakObjectPtr<USceneComponent> RideAnchor;
 
 	/** 탈것 원점 기준의 좌석 위치. 붙은 순간에 재고, 그 뒤로는 이것만 더한다. */
 	FVector RideOffset = FVector::ZeroVector;

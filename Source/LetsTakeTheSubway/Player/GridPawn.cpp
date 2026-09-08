@@ -230,6 +230,7 @@ void AGridPawn::TeleportToCell(FIntPoint Cell)
 	// 셀로 직접 옮기는 것은 언제나 그리드 위에 선다는 뜻이다. 탈것에 붙은 채로 옮겨지면
 	// 다음 틱에 탈것이 위치를 도로 가져간다.
 	Vehicle.Reset();
+	RideAnchor.Reset();
 	RideState = ERideState::OnGrid;
 
 	CurrentCell = Cell;
@@ -282,7 +283,7 @@ bool AGridPawn::PlanPath(FIntPoint Goal)
 
 // ---------------------------------------------------------------------------- 탑승과 하차
 
-void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld)
+void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent)
 {
 	if (!InVehicle)
 	{
@@ -297,6 +298,7 @@ void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld)
 	RefreshPathDebug();
 
 	Vehicle = InVehicle;
+	RideAnchor = FollowComponent;
 	WalkTarget = SeatWorld;
 	RideState = ERideState::Entering;
 
@@ -322,6 +324,7 @@ void AGridPawn::WalkOntoGrid(const FVector& NearWorld, int32 SearchRadius)
 			*GetName(), SearchRadius, CurrentCell.X, CurrentCell.Y);
 
 		Vehicle.Reset();
+		RideAnchor.Reset();
 		RideState = ERideState::OnGrid;
 		TeleportToCell(CurrentCell);
 		return;
@@ -379,13 +382,14 @@ void AGridPawn::TickStraightWalk(float DeltaSeconds)
 		{
 			// 걸어 들어가는 사이에 탈것이 사라졌다. 발밑에서 다시 그리드를 찾는다.
 			RideState = ERideState::OnGrid;
+			RideAnchor.Reset();
 			WalkOntoGrid(GetActorLocation());
 			return;
 		}
 
 		// 좌석 오프셋은 붙는 순간에 잰다. 그래야 탈것이 그동안 조금 움직였더라도 폰이
 		// 지금 서 있는 자리에 그대로 실린다.
-		RideOffset = GetActorLocation() - Ride->GetActorLocation();
+		RideOffset = GetActorLocation() - RideBaseLocation();
 		RideState = ERideState::Riding;
 		return;
 	}
@@ -394,6 +398,7 @@ void AGridPawn::TickStraightWalk(float DeltaSeconds)
 	CurrentCell = LandingCell;
 	GoalCell = LandingCell;
 	Vehicle.Reset();
+	RideAnchor.Reset();
 	RideState = ERideState::OnGrid;
 
 	Grid->NotifyPawnEnteredCell(this, CurrentCell);
@@ -406,15 +411,28 @@ void AGridPawn::TickStraightWalk(float DeltaSeconds)
 
 void AGridPawn::TickRide(float DeltaSeconds)
 {
-	AActor* Ride = Vehicle.Get();
-	if (!Ride)
+	if (!Vehicle.IsValid())
 	{
 		RideState = ERideState::OnGrid;
+		RideAnchor.Reset();
 		WalkOntoGrid(GetActorLocation());
 		return;
 	}
 
-	SetActorLocation(Ride->GetActorLocation() + RideOffset);
+	SetActorLocation(RideBaseLocation() + RideOffset);
+}
+
+FVector AGridPawn::RideBaseLocation() const
+{
+	// 앵커가 있으면 그 컴포넌트를 따른다. 에스컬레이터는 액터가 가만히 서 있고 좌석 컴포넌트만
+	// 발판을 따라 움직이므로, 액터 원점을 기준으로 삼으면 폰이 제자리에 머문다.
+	if (const USceneComponent* Anchor = RideAnchor.Get())
+	{
+		return Anchor->GetComponentLocation();
+	}
+
+	const AActor* Ride = Vehicle.Get();
+	return Ride ? Ride->GetActorLocation() : GetActorLocation();
 }
 
 void AGridPawn::TickBump(float DeltaSeconds)
