@@ -602,9 +602,14 @@ void AGridPlayerController::UpdateLeverDrag()
 	LeverSweptAngle += FMath::FindDeltaAngleDegrees(LeverLastAngle, Angle);
 	LeverLastAngle = Angle;
 
-	// 휠은 커서가 어느 쪽으로 가든 따라간다. 화면 시계 방향은 쓸어 돈 각도로는 음수이고
-	// 월드에서는 양의 yaw이므로 부호를 뒤집는다.
-	Lever->SetWheelPreviewAngle(static_cast<float>(-LeverSweptAngle));
+	// 화면 시계 방향은 쓸어 돈 각도로는 음수이고 월드에서는 양의 yaw이므로 부호를 뒤집는다.
+	// 카메라가 yaw 45도를 보고 있어 양의 월드 yaw는 화면에서도 시계 방향으로 보이므로, 커서를
+	// 시계 방향으로 돌리는 것은 양의 회전을 요청하는 것이다.
+	const int32 SweptSign = (LeverSweptAngle < 0.0) ? 1 : -1;
+
+	// 휠은 커서를 따라가되, 레버가 받지 않는 방향으로는 따라 돌지 않는다. 임계값까지 돌렸다가
+	// 거부당하는 것보다, 움직이지 않는 휠이 이쪽은 막혔다고 먼저 알려 주는 편이 친절하다.
+	Lever->SetWheelPreviewAngle(Lever->AllowsTurn(SweptSign) ? static_cast<float>(-LeverSweptAngle) : 0.0f);
 
 	if (bLeverTurnSpent)
 	{
@@ -618,12 +623,8 @@ void AGridPlayerController::UpdateLeverDrag()
 
 	bLeverTurnSpent = true;
 
-	// 카메라는 yaw 45도 방향을 보고 있어, 양의 월드 yaw가 화면에서는 시계 방향으로 보인다.
-	// 따라서 커서를 시계 방향으로 돌리면 양의 회전을 요청하는 것이다.
-	const int32 TurnSign = (LeverSweptAngle < 0.0) ? 1 : -1;
-
 	FText Reason;
-	if (!Lever->TryTurn(TurnSign, GetGridPawn(), &Reason))
+	if (!Lever->TryTurn(SweptSign, GetGridPawn(), &Reason))
 	{
 		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
 	}
@@ -645,7 +646,19 @@ void AGridPlayerController::FinishLeverDrag()
 
 	if (!bLeverTurnSpent)
 	{
-		ShowFeedback(TEXT("Drag around the wheel to turn it a quarter."), FLinearColor::White);
+		// 방향이 고정된 휠이라면 그것까지 알려 준다. 그렇지 않으면 막힌 쪽으로 계속 돌려 보면서
+		// 드래그가 짧아서 안 되는 것으로 오해하기 쉽다.
+		if (Lever->Direction == EPuzzleRotationDirection::Free)
+		{
+			ShowFeedback(TEXT("Drag around the wheel to turn it a quarter."), FLinearColor::White);
+		}
+		else
+		{
+			ShowFeedback(
+				FString::Printf(TEXT("Drag %s around the wheel to turn it a quarter."),
+					LTTSPuzzle::DescribeTurnSign(LTTSPuzzle::ResolveTurnSign(Lever->Direction, 1))),
+				FLinearColor::White);
+		}
 	}
 
 	LeverSweptAngle = 0.0;

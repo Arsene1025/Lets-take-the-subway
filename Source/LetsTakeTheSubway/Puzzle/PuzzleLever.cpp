@@ -176,6 +176,19 @@ bool APuzzleLever::TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReas
 		return false;
 	}
 
+	// 방향이 고정된 레버는 반대쪽 요청을 장애물까지 내려보내지 않는다. 이것은 장애물이 돌 수
+	// 있느냐의 문제가 아니라 이 휠이 그쪽으로는 안 돌아간다는 사실이므로, 사유도 휠을 가리킨다.
+	if (!AllowsTurn(TurnSign))
+	{
+		if (OutReason)
+		{
+			*OutReason = (Direction == EPuzzleRotationDirection::Clockwise)
+				? NSLOCTEXT("LTTSPuzzle", "LeverOnlyClockwise", "This wheel only turns clockwise.")
+				: NSLOCTEXT("LTTSPuzzle", "LeverOnlyCounterClockwise", "This wheel only turns counter-clockwise.");
+		}
+		return false;
+	}
+
 	return Target->TryRotate(TurnSign, OutReason);
 }
 
@@ -244,9 +257,13 @@ void APuzzleLever::BeginPlay()
 			TEXT("%s: no free floor beside it, so the lever cannot be worked."), *GetName());
 	}
 
+	const TCHAR* DirectionText = (Direction == EPuzzleRotationDirection::Free)
+		? TEXT("either way")
+		: LTTSPuzzle::DescribeTurnSign(LTTSPuzzle::ResolveTurnSign(Direction, 1));
+
 	UE_LOG(LogLTTSGrid, Display,
-		TEXT("%s: lever at cell (%d,%d), target %s, %d operating cell(s)."),
-		*GetName(), Cell.X, Cell.Y, *GetNameSafe(Target), Reachable);
+		TEXT("%s: lever at cell (%d,%d), target %s, turns %s, %d operating cell(s)."),
+		*GetName(), Cell.X, Cell.Y, *GetNameSafe(Target), DirectionText, Reachable);
 }
 
 void APuzzleLever::EndPlay(const EEndPlayReason::Type EndPlayReason)

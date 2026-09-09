@@ -699,7 +699,7 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 
 	UE_LOG(LogLTTSGrid, Display,
 		TEXT("%s: turned %s with %d rider(s); footprint now at cell (%d,%d)."),
-		*GetName(), (Sign > 0) ? TEXT("clockwise") : TEXT("counter-clockwise"),
+		*GetName(), LTTSPuzzle::DescribeTurnSign(Sign),
 		Riders.Num(), Destination.Min.X, Destination.Min.Y);
 
 	return true;

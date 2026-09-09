@@ -1,4 +1,4 @@
-# 러쉬아워 퍼즐 — 슬라이딩 블록 · 엘리베이터 · 회전 타일
+﻿# 러쉬아워 퍼즐 — 슬라이딩 블록 · 엘리베이터 · 회전 타일
 
 작성일 2026-09-04. 출처: `[프로그래밍]퍼즐 요소 기능 작업요청서-260904.pdf`.
 대상 레벨: `Content/Maps/GreyBoxTest_1` B2 동쪽 승강장 (B2_001).
@@ -65,6 +65,12 @@
 - `TryRotate`는 **2패스**다. 1패스에서 걸친 블록·착지 불가 셀·폰을 모두 검사하고, 전부
   통과해야 2패스에서 커밋한다. 절반만 돈 상태는 플레이어가 도달할 수 없는 상태다.
 - 걸친 블록이 있으면 거부하고 이유를 피드백에 띄운다.
+- 회전 방향은 `Direction`(`EPuzzleRotationDirection`)으로 에디터에서 고른다. 기본값은 Clockwise.
+  `Free`는 발동에 성공할 때마다 시계와 반시계를 번갈아 돌린다. 타일은 블록이 올라오면 저혼자
+  도는 장치라 플레이어가 방향을 고를 입력이 없으므로, 무작위가 아니라 예측할 수 있는 교대로 둔다.
+  거부된 회전은 순서를 소모하지 않고, 교대 순서는 한 플레이 안에서만 유지된다.
+- 구버전의 `bClockwise` bool은 `bClockwise_DEPRECATED`로 남겨 `PostLoad`에서 `Direction`으로
+  옮긴다. UHT가 `_DEPRECATED` 접미사를 잘라 내고 등록하므로 예전 직렬화 값이 그대로 로드된다.
 
 ### `Puzzle/PuzzleSubsystem.h/.cpp` — `UPuzzleSubsystem : UWorldSubsystem`
 블록/타일 레지스트리, 입력 잠금, "블록이 멈췄다 → 타일이 반응한다" 규칙, 피드백 라우팅.
@@ -73,8 +79,9 @@
 ## 3. 회전 수식
 
 좌표: 셀 `(x, y)`, East = +X, North = +Y. UE에서 **yaw +90은 +X를 +Y로 보내며, 위에서
-내려다본 화면에서 시계 방향**이다(Top 뷰는 X가 위, Y가 오른쪽). `bClockwise = true`가
-`TurnSign = +1`이고 액터 yaw에 +90이다.
+내려다본 화면에서 시계 방향**이다(Top 뷰는 X가 위, Y가 오른쪽). `Direction = Clockwise`가
+`TurnSign = +1`이고 액터 yaw에 +90이다. 부호 판정과 문구는 `PuzzleTypes.h`의
+`LTTSPuzzle::DirectionAllowsTurn` / `ResolveTurnSign` / `DescribeTurnSign`에 모여 있다.
 
 - N x N 영역의 로컬 셀: `l' = (N−1−l.y, l.x)`. N=4에서 `(3,3) → (0,3)`, 즉 우상단 칸이
   우하단으로. 기획 이미지와 일치한다.

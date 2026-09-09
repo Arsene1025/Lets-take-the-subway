@@ -37,6 +37,36 @@ APuzzleRotationTile::APuzzleRotationTile()
 	}
 }
 
+// ------------------------------------------------------------------------ 생명주기
+
+void APuzzleRotationTile::PostLoad()
+{
+	Super::PostLoad();
+
+	// 예전에는 방향이 bool 하나였다. 그 시절에 반시계로 배치해 둔 타일이 조용히 시계로 바뀌면
+	// 푸는 방법이 통째로 바뀌므로, 저장된 값을 새 설정으로 옮긴다.
+	if (!bClockwise_DEPRECATED)
+	{
+		Direction = EPuzzleRotationDirection::CounterClockwise;
+		bClockwise_DEPRECATED = true;
+	}
+}
+
+void APuzzleRotationTile::OnTileReady()
+{
+	Super::OnTileReady();
+
+	// 교대 순서는 한 플레이 안에서만 의미가 있다. 재시작하면 다시 시계부터다.
+	NextFreeTurnSign = 1;
+}
+
+// ------------------------------------------------------------------------ 방향
+
+int32 APuzzleRotationTile::ResolveTurnSign() const
+{
+	return LTTSPuzzle::ResolveTurnSign(Direction, NextFreeTurnSign);
+}
+
 void APuzzleRotationTile::RefreshVisual()
 {
 	Super::RefreshVisual();
@@ -52,7 +82,14 @@ void APuzzleRotationTile::RefreshVisual()
 
 FString APuzzleRotationTile::DescribeTile() const
 {
-	return FString::Printf(TEXT("Rotation tile, %s."), bClockwise ? TEXT("clockwise") : TEXT("counter-clockwise"));
+	if (Direction == EPuzzleRotationDirection::Free)
+	{
+		return FString::Printf(TEXT("Rotation tile, alternating (next: %s)."),
+			LTTSPuzzle::DescribeTurnSign(NextFreeTurnSign));
+	}
+
+	return FString::Printf(TEXT("Rotation tile, %s."),
+		LTTSPuzzle::DescribeTurnSign(LTTSPuzzle::ResolveTurnSign(Direction, 1)));
 }
 
 void APuzzleRotationTile::OnBlockCameToRest(APuzzleBlock& Block)
@@ -86,7 +123,7 @@ bool APuzzleRotationTile::TryRotate(FText* OutReason)
 		return false;
 	}
 
-	const int32 TurnSign = bClockwise ? 1 : -1;
+	const int32 TurnSign = ResolveTurnSign();
 
 	// 첫 번째 패스(검사 패스): 모든 피스가 들어맞는다는 것이 확인되기 전에는 아무것도
 	// 커밋하지 않는다. 중간에 실패한 회전은 플레이어가 도달할 수 없는 상태로 퍼즐을 남긴다.
@@ -213,8 +250,15 @@ bool APuzzleRotationTile::TryRotate(FText* OutReason)
 	bRotating = true;
 	RotationElapsed = 0.0f;
 
+	// 거부된 회전은 순서를 소모하지 않는다: 검사 패스가 돌려보낸 뒤에는 여기까지 오지 못한다.
+	// 그래야 바닥이 모자라 한 번 막혔다고 해서 다음 방향이 뒤집히지 않는다.
+	if (Direction == EPuzzleRotationDirection::Free)
+	{
+		NextFreeTurnSign = -TurnSign;
+	}
+
 	Subsystem->ShowFeedback(
-		FString::Printf(TEXT("The space turns %s."), bClockwise ? TEXT("clockwise") : TEXT("counter-clockwise")),
+		FString::Printf(TEXT("The space turns %s."), LTTSPuzzle::DescribeTurnSign(TurnSign)),
 		FLinearColor(0.45f, 0.85f, 1.0f));
 
 	return true;
