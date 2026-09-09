@@ -227,6 +227,17 @@ void APuzzleBlock::OnConstruction(const FTransform& Transform)
 	RefreshVisual();
 }
 
+void APuzzleBlock::PostRegisterAllComponents()
+{
+	Super::PostRegisterAllComponents();
+
+	// 자식 아트 액터는 컴포넌트 등록 때 생기고, 그리드는 어떤 BeginPlay보다 먼저
+	// (GridActor::PostInitializeComponents) 다시 구워진다. 그 사이에 아트가 콜리전을 켠 채
+	// 남아 있지 않도록 여기서 먼저 정리한다. BeginPlay의 RefreshVisual이 한 번 더 하지만
+	// 그때는 이미 늦다.
+	SanitiseVisualActor();
+}
+
 void APuzzleBlock::BeginPlay()
 {
 	Super::BeginPlay();

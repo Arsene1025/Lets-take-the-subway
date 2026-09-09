@@ -393,7 +393,14 @@ void AGridActor::GenerateFromTraces()
 		{
 			continue;
 		}
-		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()))
+		// 자식 액터(퍼즐 블록에 붙은 아트 비주얼)는 부모가 태그를 갖고 있으면 함께 무시한다.
+		// 자식의 태그와 콜리전은 부모의 BeginPlay에서 정리되는데, 이 생성은 그보다 먼저
+		// 돈다. 그냥 두면 콜리전이 있는 아트 메시 윗면이 그 셀의 바닥으로 구워지고, 블록은
+		// BeginPlay에서 그 높이로 스냅해 자기 아트 높이만큼 떠오른다.
+		const AActor* Parent = Actor->GetParentActor();
+		const bool bParentIgnored = Parent && Parent->ActorHasTag(LTTSGrid::GenerationIgnoreTag());
+
+		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()) || bParentIgnored)
 		{
 			Params.AddIgnoredActor(Actor);
 		}
