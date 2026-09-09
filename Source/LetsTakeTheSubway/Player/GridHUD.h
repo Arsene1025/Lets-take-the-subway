@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -6,7 +6,7 @@
 #include "GameFramework/HUD.h"
 #include "GridHUD.generated.h"
 
-/** Text-only debug overlay. Gated on ltts.GridDebug. */
+/** 텍스트 전용 디버그 오버레이. ltts.GridDebug로 켜고 끈다. */
 UCLASS()
 class LETSTAKETHESUBWAY_API AGridHUD : public AHUD
 {

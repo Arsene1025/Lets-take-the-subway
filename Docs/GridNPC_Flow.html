@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>그리드 행인 동작 흐름</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --ground: #eef1f1;
+  --surface: #fafbfb;
+  --surface-sunk: #e4e9e9;
+  --ink: #14181b;
+  --ink-soft: #5a6469;
+  --ink-faint: #8a9498;
+  --rule: #d2d9d9;
+  --rule-strong: #b6c0c0;
+  --accent: #0a7ea4;
+  --accent-soft: #cfe8f2;
+  --trace: #3f9fc8;
+  --warn: #a86a08;
+  --warn-soft: #f3e6cd;
+  --stop: #a3392b;
+  --stop-soft: #f2dcd8;
+  --shadow: 0 1px 2px rgba(20, 24, 27, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1315;
+    --surface: #171d20;
+    --surface-sunk: #10161a;
+    --ink: #e7ecee;
+    --ink-soft: #97a3a8;
+    --ink-faint: #6d7a80;
+    --rule: #2a3236;
+    --rule-strong: #3c464b;
+    --accent: #62bcda;
+    --accent-soft: #17323d;
+    --trace: #78c8ff;
+    --warn: #dda953;
+    --warn-soft: #33290f;
+    --stop: #e08a7a;
+    --stop-soft: #3a1e19;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0f1315;
+  --surface: #171d20;
+  --surface-sunk: #10161a;
+  --ink: #e7ecee;
+  --ink-soft: #97a3a8;
+  --ink-faint: #6d7a80;
+  --rule: #2a3236;
+  --rule-strong: #3c464b;
+  --accent: #62bcda;
+  --accent-soft: #17323d;
+  --trace: #78c8ff;
+  --warn: #dda953;
+  --warn-soft: #33290f;
+  --stop: #e08a7a;
+  --stop-soft: #3a1e19;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.72;
+  letter-spacing: -0.003em;
+}
+code, .mono, .cell {
+  font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.page { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+.measure { max-width: 68ch; }
+
+/* ---- 머리말 ---- */
+.masthead {
+  border-bottom: 2px solid var(--ink);
+  padding: 56px 0 20px;
+  margin-bottom: 40px;
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 14px;
+}
+h1 {
+  font-size: clamp(30px, 5vw, 44px);
+  font-weight: 700;
+  line-height: 1.16;
+  letter-spacing: -0.02em;
+  margin: 0 0 16px;
+  text-wrap: balance;
+}
+.standfirst {
+  font-size: 18px;
+  color: var(--ink-soft);
+  margin: 0;
+  max-width: 60ch;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin-top: 24px;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+.meta b { color: var(--ink-soft); font-weight: 600; }
+
+/* ---- 섹션 ---- */
+section { margin-bottom: 56px; }
+h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 0 0 4px;
+  text-wrap: balance;
+}
+.sec-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: .1em;
+  display: block;
+  margin-bottom: 6px;
+}
+h2 + .lede { color: var(--ink-soft); margin: 0 0 24px; }
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 32px 0 8px;
+  letter-spacing: -0.01em;
+}
+p { margin: 0 0 16px; }
+a { color: var(--accent); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+.cell {
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: .88em;
+  white-space: nowrap;
+}
+code:not(.cell) { font-size: .89em; color: var(--ink); }
+
+/* ---- 노선도 ---- */
+.routewrap {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+  padding: 8px 0 4px;
+  margin-bottom: 12px;
+}
+.routewrap svg { display: block; min-width: 860px; }
+.svg-label { font-family: 'IBM Plex Sans KR', system-ui, sans-serif; font-size: 13px; font-weight: 600; }
+.svg-cell { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.svg-note { font-family: 'IBM Plex Sans KR', system-ui, sans-serif; font-size: 11.5px; letter-spacing: .02em; }
+.caption { font-size: 13px; color: var(--ink-faint); margin: 0 0 8px; }
+
+/* ---- 단계 ---- */
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.steps > li {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid var(--rule);
+}
+.steps > li:last-child { border-bottom: 1px solid var(--rule); }
+.marker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  padding-top: 4px;
+}
+.step-title { font-weight: 600; margin: 0 0 4px; }
+.step-body { margin: 0; color: var(--ink-soft); font-size: 15px; }
+.branch {
+  margin-top: 10px;
+  padding: 8px 0 8px 14px;
+  border-left: 2px solid var(--warn);
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.branch b { color: var(--warn); font-weight: 600; }
+.branch.stop { border-left-color: var(--stop); }
+.branch.stop b { color: var(--stop); }
+
+/* ---- 카드 ---- */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+}
+.card h3 { margin: 0 0 6px; font-size: 15px; }
+.card .kicker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: .04em;
+  display: block;
+  margin-bottom: 8px;
+}
+.card p { margin: 0; font-size: 14.5px; color: var(--ink-soft); }
+
+/* ---- 표 ---- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14.5px; }
+th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+thead th {
+  font-size: 11.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+  background: var(--surface-sunk);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.k { white-space: nowrap; }
+
+/* ---- 로그 ---- */
+pre.log {
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--trace);
+  border-radius: 4px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0 0 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.85;
+  color: var(--ink-soft);
+}
+pre.log b { color: var(--ink); font-weight: 600; }
+
+.note {
+  border-left: 2px solid var(--rule-strong);
+  padding: 2px 0 2px 16px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  margin: 0 0 16px;
+}
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 20px;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="masthead">
+  <p class="eyebrow">Lets Take the Subway · 프로그래밍 문서</p>
+  <h1>그리드 행인 동작 흐름</h1>
+  <p class="standfirst">스포너가 행인을 내보내고, 행인이 그리드 밖에서 걸어 들어와 경유 셀을 따라가다 목적지에서 사라지기까지. 코드가 실제로 무엇을 언제 하는지 순서대로 적었다.</p>
+  <div class="meta">
+    <span><b>대상</b> AGridNPC · AGridNPCSpawner</span>
+    <span><b>작성</b> 2026-09-07</span>
+    <span><b>같이 볼 것</b> Docs/GridNPC_Usage.html · Docs/Plans/GridNPC.md</span>
+  </div>
+</header>
+
+<section>
+  <span class="sec-num">01</span>
+  <h2>구성 요소는 둘뿐이다</h2>
+  <p class="lede">그리드, 길찾기, 셀 점유는 전부 기존 것을 그대로 쓴다. 새로 생긴 것은 아래 두 클래스다.</p>
+  <div class="pair">
+    <div class="card">
+      <span class="kicker">NPC/GridNPCSpawner.h</span>
+      <h3>AGridNPCSpawner</h3>
+      <p>레벨에 놓는 액터. 경유 셀 목록을 들고 있다가 타이머가 울릴 때마다 행인을 하나 만든다. 동시에 살아 있는 수를 스스로 센다.</p>
+    </div>
+    <div class="card">
+      <span class="kicker">NPC/GridNPC.h</span>
+      <h3>AGridNPC</h3>
+      <p>컨트롤러 없는 폰. 자기 경로를 들고 한 칸씩 걷다가 마지막 칸에서 스스로 사라진다. 콜리전이 전혀 없다.</p>
+    </div>
+  </div>
+  <p class="measure">행인이 폰인 이유는 그리드가 폰으로 말하기 때문이다. <code>CanPawnEnter</code>와 <code>FindPath</code>가 <code>const APawn*</code>를 받고, Conditional 셀 규칙은 폰의 태그를 읽는다. 컨트롤러는 붙지 않고 AI도 없다.</p>
+</section>
+
+<section>
+  <span class="sec-num">02</span>
+  <h2>경로는 이렇게 생겼다</h2>
+  <p class="lede">기획자가 적는 것은 굵은 점뿐이다. 점과 점 사이는 기존 A*가 채운다.</p>
+  <div class="routewrap">
+    <svg viewBox="0 0 900 200" role="img" aria-label="스포너에서 목적지까지의 행인 경로 다이어그램">
+      <line x1="60" y1="78" x2="200" y2="78" stroke="var(--warn)" stroke-width="4" stroke-dasharray="7 7" fill="none"></line>
+      <line x1="200" y1="78" x2="820" y2="78" stroke="var(--accent)" stroke-width="4" fill="none"></line>
+
+      <circle cx="60" cy="78" r="9" fill="var(--ground)" stroke="var(--warn)" stroke-width="4"></circle>
+      <circle cx="200" cy="78" r="9" fill="var(--ground)" stroke="var(--accent)" stroke-width="4"></circle>
+      <circle cx="355" cy="78" r="7" fill="var(--accent)"></circle>
+      <circle cx="510" cy="78" r="7" fill="var(--accent)"></circle>
+      <circle cx="665" cy="78" r="7" fill="var(--accent)"></circle>
+      <circle cx="820" cy="78" r="11" fill="var(--accent)" stroke="var(--ground)" stroke-width="4"></circle>
+      <circle cx="820" cy="78" r="16" fill="none" stroke="var(--accent)" stroke-width="2"></circle>
+
+      <text class="svg-label" x="60" y="42" text-anchor="middle" fill="var(--ink)">스포너</text>
+      <text class="svg-cell" x="60" y="112" text-anchor="middle" fill="var(--warn)">(69,62)</text>
+      <text class="svg-cell" x="60" y="130" text-anchor="middle" fill="var(--ink-faint)">NoFloor</text>
+
+      <text class="svg-label" x="200" y="42" text-anchor="middle" fill="var(--ink)">진입 셀</text>
+      <text class="svg-cell" x="200" y="112" text-anchor="middle" fill="var(--accent)">(70,62)</text>
+      <text class="svg-cell" x="200" y="130" text-anchor="middle" fill="var(--ink-faint)">자동 선택</text>
+
+      <text class="svg-label" x="355" y="42" text-anchor="middle" fill="var(--ink)">경유 0</text>
+      <text class="svg-cell" x="355" y="112" text-anchor="middle" fill="var(--ink-soft)">(72,62)</text>
+
+      <text class="svg-label" x="510" y="42" text-anchor="middle" fill="var(--ink)">경유 1</text>
+      <text class="svg-cell" x="510" y="112" text-anchor="middle" fill="var(--ink-soft)">(88,62)</text>
+
+      <text class="svg-label" x="665" y="42" text-anchor="middle" fill="var(--ink)">경유 2</text>
+      <text class="svg-cell" x="665" y="112" text-anchor="middle" fill="var(--ink-soft)">(93,58)</text>
+
+      <text class="svg-label" x="820" y="42" text-anchor="middle" fill="var(--ink)">목적지</text>
+      <text class="svg-cell" x="820" y="112" text-anchor="middle" fill="var(--ink-soft)">(93,44)</text>
+      <text class="svg-cell" x="820" y="130" text-anchor="middle" fill="var(--ink-faint)">여기서 소멸</text>
+
+      <text class="svg-note" x="130" y="168" text-anchor="middle" fill="var(--warn)">그리드 밖 · 직선 보행</text>
+      <text class="svg-note" x="510" y="168" text-anchor="middle" fill="var(--accent)">A* 가 셀 단위로 자동 연결 · 41 스텝</text>
+    </svg>
+  </div>
+  <p class="caption">B2 동쪽 승강장 프로토타입 배치. 셀 좌표는 2026-09-07 에디터에서 실측한 값이다.</p>
+  <p class="measure">경유 셀 목록은 <b>걸음 단위 경로가 아니라 반드시 지나야 하는 지점</b>이다. 사이에 벽이 있으면 A*가 돌아간다. 목록이 <span class="cell">[A, B, C]</span>라면 실제 경로는 <span class="cell">진입 → A → B → C</span>가 되고, C에 닿는 순간 행인은 사라진다.</p>
+</section>
+
+<section>
+  <span class="sec-num">03</span>
+  <h2>태어나서 사라지기까지</h2>
+  <p class="lede">스포너의 <code>BeginPlay</code>부터 행인의 <code>Destroy</code>까지, 실행 순서 그대로다.</p>
+  <ol class="steps">
+    <li>
+      <span class="marker">S1</span>
+      <div>
+        <p class="step-title">스포너가 경유 셀을 검사한다</p>
+        <p class="step-body">그리드를 찾고, 경유 셀이 하나라도 <code>IsValidCell</code> 또는 <code>IsCellWalkableStatic</code>을 통과하지 못하면 그 셀 번호를 찍고 스포너를 끈다. 배치 실수는 첫 행인이 태어난 뒤가 아니라 이 시점에 드러난다.</p>
+        <div class="branch stop"><b>목록이 비었으면</b> 경고를 남기고 스포너가 꺼진다. 목적지가 없으면 행인은 진입하자마자 사라질 뿐이다.</div>
+      </div>
+    </li>
+    <li>
+      <span class="marker">S2</span>
+      <div>
+        <p class="step-title">타이머를 건다</p>
+        <p class="step-body"><code>FirstSpawnDelay</code> 뒤에 처음, 그다음부터 <code>SpawnInterval</code>마다 반복. 타이머는 <code>BeginPlay</code>에서만 걸린다. <code>OnConstruction</code>은 에디터 월드에서도 돌기 때문이다.</p>
+      </div>
+    </li>
+    <li>
+      <span class="marker">S3</span>
+      <div>
+        <p class="step-title">상한을 확인하고 하나 만든다</p>
+        <p class="step-body">살아 있는 행인 목록에서 사라진 것을 걷어 낸 뒤, <code>MaxAlive</code>에 이미 닿았으면 이번 회차는 건너뛴다. 아니면 <code>SpawnActorDeferred</code>로 만들고 속도와 태그와 경유 셀을 넣은 다음 <code>FinishSpawning</code>한다.</p>
+        <div class="branch"><b>지연 스폰을 쓰는 이유</b>는 행인의 <code>BeginPlay</code>가 경로를 이미 쥔 채로 돌아야 하기 때문이다. 충돌 처리는 <code>AlwaysSpawn</code>으로 못박는다. 폰의 기본값은 겹치면 스폰을 포기하는 것인데, 스포너는 허공에도 놓일 수 있다.</div>
+      </div>
+    </li>
+    <li>
+      <span class="marker">N1</span>
+      <div>
+        <p class="step-title">행인이 진입 셀을 고른다</p>
+        <p class="step-body">스폰 위치를 셀로 바꿔 본다. 그 셀에 들어갈 수 있으면 그대로 쓴다. 아니면 링을 넓혀 가며 찾는다. 자세한 규칙은 4절.</p>
+        <div class="branch stop"><b>반경 안에 없으면</b> 경고를 남기고 그 자리에서 사라진다. 스포너는 계속 돈다.</div>
+      </div>
+    </li>
+    <li>
+      <span class="marker">N2</span>
+      <div>
+        <p class="step-title">경로를 한 번에 다 잇는다</p>
+        <p class="step-body"><span class="cell">[진입 셀] + leg(진입→W0) + leg(W0→W1) + …</span>. 각 구간은 <code>AGridActor::FindPath</code> 한 번이다. 같은 셀이 연달아 나오면 빈 구간이라 그냥 건너뛴다.</p>
+        <div class="branch stop"><b>구간 하나라도 실패하면</b> 행인이 스포너에 알리고 사라진다. 스포너는 오류를 한 번 찍고 <b>스스로 멈춘다</b>. 행인은 점유자를 통과하므로 경로가 없다는 것은 곧 저작 오류이고, 4초마다 태어났다 죽기를 반복시킬 이유가 없다.</div>
+      </div>
+    </li>
+    <li>
+      <span class="marker">N3</span>
+      <div>
+        <p class="step-title">위치는 스냅하지 않는다</p>
+        <p class="step-body">진입 셀이 경로의 첫 원소로 들어가 있고 행인은 스폰 지점에 그대로 서 있다. 그래서 다음 절의 평범한 스텝 루프가 <b>그리드로 걸어 들어가는 동작</b>을 그대로 해 준다. 순간이동하지 않는다.</p>
+      </div>
+    </li>
+    <li>
+      <span class="marker">N4</span>
+      <div>
+        <p class="step-title">매 프레임 한 칸씩 간다</p>
+        <p class="step-body">5절의 루프를 경로가 빌 때까지 반복한다.</p>
+      </div>
+    </li>
+    <li>
+      <span class="marker">N5</span>
+      <div>
+        <p class="step-title">경로가 비면 사라진다</p>
+        <p class="step-body">마지막 경유 셀에 닿아 경로가 비면 다음 틱에서 <code>Destroy</code>. 스포너의 약참조가 무효가 되면서 슬롯이 하나 빈다.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <span class="sec-num">04</span>
+  <h2>그리드 밖에서 스폰되면</h2>
+  <p class="lede">요청의 세 번째 항목. 스포너가 계단 입구나 승강장 가장자리처럼 그리드가 깔리지 않은 곳에 있어도 된다.</p>
+  <p class="measure">행인은 링을 반경 1부터 넓혀 가며 후보 셀을 본다. <b>후보가 하나라도 나온 첫 반경에서 멈추고</b>, 그 반경 안에서 다음 둘을 만족하는 셀 중 월드 거리가 가장 가까운 것을 고른다.</p>
+  <div class="tablewrap" style="margin-bottom:16px">
+    <table>
+      <thead><tr><th>조건</th><th>왜</th></tr></thead>
+      <tbody>
+        <tr><td class="k">들어갈 수 있는 셀</td><td><code>CanPawnEnter</code>를 통과한다. 통과 태그가 붙어 있으므로 점유자는 무시된다.</td></tr>
+        <tr><td class="k">첫 경유 셀까지 길이 있다</td><td>경로가 없는 섬으로 들어가 버리는 것을 막는다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="measure">기존 <code>AGridActor::FindNearestWalkableCell</code>을 쓰지 않은 이유가 여기 있다. 그 함수는 링 스캔에서 <b>처음 걸린</b> 셀을 돌려주므로 실제로 가장 가까운 셀이 아닐 수 있고, 갇힌 셀도 가려내지 못한다. 프로토타입 배치에서 스포너가 있는 <span class="cell">(69,62)</span>는 서쪽에 5 m 위 윗층 바닥이, 동쪽에 승강장이 있는 자리라 이 차이가 그대로 드러난다.</p>
+  <p class="note">진입 구간은 <b>직선 보행</b>이다. 길찾기를 거치지 않으므로 스포너와 진입 셀 사이에 벽이 있으면 뚫고 지나간다. 스포너는 그리드 가장자리 근처에 두는 것이 전제다.</p>
+</section>
+
+<section>
+  <span class="sec-num">05</span>
+  <h2>한 칸을 가는 동안 일어나는 일</h2>
+  <p class="lede">플레이어 폰의 <code>Tick</code>과 같은 구조다. 타이머도 애니메이션 커브도 없고 정속 보간뿐이다.</p>
+  <ol class="steps">
+    <li>
+      <span class="marker">T1</span>
+      <div>
+        <p class="step-title">경로가 비었는지 본다</p>
+        <p class="step-body">비었으면 목적지에 닿은 것이므로 로그를 남기고 <code>Destroy</code>.</p>
+      </div>
+    </li>
+    <li>
+      <span class="marker">T2</span>
+      <div>
+        <p class="step-title">다음 셀을 다시 검사한다</p>
+        <p class="step-body">계획한 뒤에 Conditional 규칙이 바뀌었을 수 있다. 통과를 끈 행인이라면 점유도 여기서 걸린다. 매 프레임 검사하는 것은 플레이어와 같은 규칙이다.</p>
+        <div class="branch"><b>막혔으면</b> 마지막으로 완전히 들어갔던 셀로 되돌아가 대기한다. <code>BlockedRetrySeconds</code>마다 <b>현재 셀에서 남은 경유 셀까지</b> 경로를 다시 계산한다. 아직 그리드 밖이라면 진입 셀부터 다시 고른다. 경고는 한 번만 찍는다.</div>
+      </div>
+    </li>
+    <li>
+      <span class="marker">T3</span>
+      <div>
+        <p class="step-title">셀 중심으로 정속 이동한다</p>
+        <p class="step-body"><code>VInterpConstantTo</code>를 <code>MoveSpeed</code> cm/s로. 목표 높이는 셀의 바닥 Z이므로 계단과 경사로가 별도 코드 없이 처리된다. 수평 이동 방향으로 몸을 돌려 코가 진행 방향을 향한다.</p>
+      </div>
+    </li>
+    <li>
+      <span class="marker">T4</span>
+      <div>
+        <p class="step-title">0.5 cm 안에 들어오면 도착 처리</p>
+        <p class="step-body">정확한 중심으로 스냅하고 현재 셀을 갱신한 뒤 경로 맨 앞을 버린다. 그 셀이 다음 경유 셀이었다면 경유 인덱스를 하나 넘긴다.</p>
+      </div>
+    </li>
+    <li>
+      <span class="marker">T5</span>
+      <div>
+        <p class="step-title">플레이어와 겹치는지 본다</p>
+        <p class="step-body">6절. 상태가 바뀔 때만 머티리얼을 갈아 끼운다.</p>
+      </div>
+    </li>
+  </ol>
+  <p class="note"><b>현재 셀은 값이 없을 수 있다.</b> 그리드에 올라서기 전까지 <code>CurrentCell</code>은 비어 있다. 가짜 셀로 겹침 판정이나 재계획을 하지 않기 위해서다.</p>
+</section>
+
+<section>
+  <span class="sec-num">06</span>
+  <h2>통과와 반투명</h2>
+  <p class="lede">행인은 퍼즐의 일부가 아니다. 플레이어의 길을 막아서도, 블록에 갇혀서도 안 된다.</p>
+  <h3>점유 레이어를 건너뛰는 방법</h3>
+  <p class="measure">그리드에 <code>LTTSGrid::PassThroughOccupantsTag()</code>, 값으로는 <span class="cell">GridPassThrough</span>라는 태그를 하나 더했다. 이 태그가 붙은 폰에게는 <code>CanPawnEnter</code>와 <code>DescribeCell</code>의 점유 검사가 통째로 건너뛰어진다.</p>
+  <p class="measure">함수에 인자를 더하지 않고 태그로 둔 이유는, <b>통과가 질의마다 정할 값이 아니라 이동체 자신의 성질</b>이기 때문이다. 인자였다면 같은 행인의 길찾기, 매 걸음 재검사, 진입 셀 탐색이 서로 다른 답을 낼 수 있다. 태그로 두면 <code>CanPawnEnter</code>를 지나는 모든 경로가 저절로 일치하고, 그리드는 여전히 NPC 클래스를 모른다. 플레이어에게는 이 태그가 없으므로 동작이 하나도 바뀌지 않는다.</p>
+  <h3>겹치는 동안 반투명</h3>
+  <div class="tablewrap" style="margin-bottom:16px">
+    <table>
+      <thead><tr><th>판정</th><th>내용</th></tr></thead>
+      <tbody>
+        <tr><td class="k">기준</td><td>행인의 {현재 셀, 진입 중인 셀}과 플레이어의 {현재 셀, 진입 중인 셀}이 하나라도 겹치면 반투명.</td></tr>
+        <tr><td class="k">왜 두 셀인가</td><td>마주 걸어오는 둘은 셀이 완전히 같아지기 전부터 시각적으로 겹친다. 현재 셀만 보면 한 프레임 늦는다.</td></tr>
+        <tr><td class="k">머티리얼</td><td>엔진의 <span class="cell">M_SimpleUnlitTranslucent</span>로 만든 동적 인스턴스. <code>Color</code> 파라미터의 알파가 불투명도다.</td></tr>
+        <tr><td class="k">없을 때</td><td>불투명한 채로 지나가고 경고를 한 번 남긴다. 메시를 숨기면 행인이 통째로 사라져 더 나쁘다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">프로젝트 툰 마스터 <span class="cell">M_ToonSurface</span>는 Opaque라서 인스턴스로는 반투명이 되지 않는다. 아트 단계에서 Opacity 핀을 단 전용 머티리얼이 생기면 <code>GhostMaterial</code> 프로퍼티만 바꿔 끼우면 된다.</p>
+</section>
+
+<section>
+  <span class="sec-num">07</span>
+  <h2>다른 시스템과 닿는 곳</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>시스템</th><th>관계</th></tr></thead>
+      <tbody>
+        <tr><td class="k">셀 점유 <code>Occupants</code></td><td>행인은 <b>등록하지 않고</b> 통과 태그로 <b>무시한다</b>. 퍼즐 블록은 행인을 보지 못하고 그대로 슬라이드한다.</td></tr>
+        <tr><td class="k">Conditional 셀 규칙</td><td>그대로 적용된다. 개찰구를 지나는 경로라면 스포너의 <code>NPCTags</code>에 <span class="cell">HasTicket</span>을 적는다.</td></tr>
+        <tr><td class="k">StageClear 셀</td><td>행인은 <code>NotifyPawnEnteredCell</code>을 부르지 않는다. 게임 모드에도 플레이어 폰 가드를 넣어 두 겹으로 막았다.</td></tr>
+        <tr><td class="k">그리드 생성 트레이스</td><td>생성은 폰을 이미 건너뛴다. 스포너와 행인 모두 <span class="cell">GridTraceIgnore</span> 태그도 달고 있어 셀을 오염시키지 않는다.</td></tr>
+        <tr><td class="k">커서 클릭</td><td>행인의 모든 메시가 <code>NoCollision</code>이다. 행인 위를 클릭해도 뒤쪽 바닥 셀로 플레이어가 이동한다.</td></tr>
+        <tr><td class="k">돌아가는 장애물 · 회전 타일</td><td>행인을 밀어내지 않는다. 통과 모드에서는 벽 안에 잠깐 있다 걸어 나온다.</td></tr>
+        <tr><td class="k">디버그 경로 표시</td><td>플레이어가 쓰는 영구 라인 배처는 배치 ID가 하나뿐이라 같이 쓰면 서로의 선을 지운다. 행인은 매 프레임 수명 없는 선으로 따로 그린다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <span class="sec-num">08</span>
+  <h2>로그로 읽는 법</h2>
+  <p class="lede">모두 <code>LogLTTSGrid</code> 카테고리다. 정상 동작이면 아래 두 줄이 보인다.</p>
+  <pre class="log"><b>Display</b>  NPCSpawner_1: at cell (69,62), 4 waypoints valid, every 4.0 s,
+          up to 3 alive; timer started.
+<b>Display</b>  GridNPC_2: entering the grid at cell (70,62); 4 waypoint(s), 43 step(s).
+<b>Display</b>  GridNPC_2: reached its destination; despawning.</pre>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>메시지</th><th>뜻과 조치</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><code>waypoint N is not a walkable cell</code></td><td>경유 셀이 그리드 밖이거나 막혀 있다. 스포너가 꺼진다. 셀 좌표를 고친다.</td></tr>
+        <tr><td class="k"><code>no reachable grid cell within N cells</code></td><td>스포너 주변에 들어갈 셀이 없다. <code>EntrySearchRadius</code>를 키우거나 스포너를 옮긴다.</td></tr>
+        <tr><td class="k"><code>could not route from … disabling this spawner</code></td><td>경유 셀 사이가 끊겨 있다. 경로 중간에 벽이 있는지 본다.</td></tr>
+        <tr><td class="k"><code>cell (x,y) is blocked … waiting</code></td><td>통과를 끈 행인이 블록 앞에서 기다리는 중. 정상이다.</td></tr>
+        <tr><td class="k"><code>no ghost material</code></td><td>반투명 머티리얼이 비었다. 겹쳐도 불투명하게 지나간다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  Lets Take the Subway · Tailcomet Games · 계획서와 구현 결과는 <code>Docs/Plans/GridNPC.md</code>, 배치 절차는 <code>Docs/GridNPC_Usage.html</code>.
+</footer>
+
+</div>
+</body>
+</html>

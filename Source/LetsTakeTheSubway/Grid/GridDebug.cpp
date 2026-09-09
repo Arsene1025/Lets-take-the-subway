@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Grid/GridDebug.h"
 
@@ -17,7 +17,7 @@ TAutoConsoleVariable<int32> CVarGridDebug(
 
 namespace
 {
-	// Arbitrary but stable ids so each overlay can be cleared without touching the other.
+	// 임의지만 고정된 id. 각 오버레이를 다른 쪽에 손대지 않고 지울 수 있다.
 	constexpr uint32 PathBatchID = 0x4C545301;
 	constexpr uint32 HoverBatchID = 0x4C545302;
 
@@ -73,6 +73,11 @@ void FGridRuntimeDebugDrawer::ClearPath(UWorld* World)
 
 void FGridRuntimeDebugDrawer::DrawHover(UWorld* World, const AGridActor& Grid, FIntPoint Cell, bool bEnterable)
 {
+	DrawHoverCells(World, Grid, TArray<FIntPoint>{ Cell }, bEnterable);
+}
+
+void FGridRuntimeDebugDrawer::DrawHoverCells(UWorld* World, const AGridActor& Grid, const TArray<FIntPoint>& Cells, bool bEnterable)
+{
 #if ENABLE_DRAW_DEBUG
 	ULineBatchComponent* Batcher = GetBatcher(World);
 	if (!Batcher)
@@ -82,16 +87,19 @@ void FGridRuntimeDebugDrawer::DrawHover(UWorld* World, const AGridActor& Grid, F
 
 	Batcher->ClearBatch(HoverBatchID);
 
-	if (!Grid.IsValidCell(Cell))
-	{
-		return;
-	}
-
 	const double HalfSize = Grid.CellSize * 0.5;
-	const FVector Centre = Grid.CellToWorld(Cell) + FVector(0.0, 0.0, 8.0);
 	const FLinearColor Color = bEnterable ? FLinearColor(0.2f, 1.0f, 0.2f) : FLinearColor(1.0f, 0.2f, 0.2f);
 
-	Batcher->DrawBox(Centre, FVector(HalfSize, HalfSize, 3.0), Color, -1.0f, SDPG_World, 3.0f, HoverBatchID);
+	for (const FIntPoint& Cell : Cells)
+	{
+		if (!Grid.IsValidCell(Cell))
+		{
+			continue;
+		}
+
+		const FVector Centre = Grid.CellToWorld(Cell) + FVector(0.0, 0.0, 8.0);
+		Batcher->DrawBox(Centre, FVector(HalfSize, HalfSize, 3.0), Color, -1.0f, SDPG_World, 3.0f, HoverBatchID);
+	}
 #endif
 }
 

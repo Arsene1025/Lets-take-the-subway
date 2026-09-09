@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Grid/GridActor.h"
 
@@ -15,6 +15,20 @@
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 
+namespace
+{
+	/**
+	 * 이 폰이 셀 점유자를 통과하는가.
+	 *
+	 * 태그 하나로 판정하므로 그리드는 어떤 NPC 클래스도 알 필요가 없고, CanPawnEnter를
+	 * 거치는 길찾기 · 매 걸음 재검사 · 진입 셀 탐색이 저절로 같은 답을 낸다.
+	 */
+	bool PawnPassesThroughOccupants(const APawn* Pawn)
+	{
+		return Pawn != nullptr && Pawn->ActorHasTag(LTTSGrid::PassThroughOccupantsTag());
+	}
+}
+
 AGridActor::AGridActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -26,7 +40,7 @@ AGridActor::AGridActor()
 	DebugDrawComponent->SetupAttachment(SceneRoot);
 }
 
-// ---------------------------------------------------------------------------- Conversions
+// ---------------------------------------------------------------------------- 변환
 
 FIntPoint AGridActor::WorldToCell(const FVector& World) const
 {
@@ -46,7 +60,7 @@ FVector AGridActor::CellToWorld(FIntPoint Cell) const
 		Z);
 }
 
-// ---------------------------------------------------------------------------- Walkability
+// ---------------------------------------------------------------------------- 걸을 수 있음 판정
 
 bool AGridActor::IsCellWalkableStatic(FIntPoint Cell) const
 {
@@ -61,10 +75,94 @@ bool AGridActor::IsCellWalkableStatic(FIntPoint Cell) const
 		|| Data->Type == EGridCellType::Conditional;
 }
 
+// ---------------------------------------------------------------------------- 점유
+
+bool AGridActor::SetOccupant(FIntPoint Cell, AActor* Occupant)
+{
+	if (!Occupant || !IsValidCell(Cell))
+	{
+		return false;
+	}
+
+	const int32 Index = CellToIndex(Cell);
+	if (const TWeakObjectPtr<AActor>* Existing = Occupants.Find(Index))
+	{
+		const AActor* Holder = Existing->Get();
+		if (Holder && Holder != Occupant)
+		{
+			return false;
+		}
+	}
+
+	Occupants.Add(Index, Occupant);
+	return true;
+}
+
+void AGridActor::ClearOccupant(FIntPoint Cell, const AActor* Expected)
+{
+	if (!IsValidCell(Cell))
+	{
+		return;
+	}
+
+	const int32 Index = CellToIndex(Cell);
+	if (const TWeakObjectPtr<AActor>* Existing = Occupants.Find(Index))
+	{
+		// 오래된 항목(점유자가 파괴됨)은 누구든 지울 수 있다. 그래야 레벨을 떠난 블록이
+		// 셀을 영구히 걸을 수 없는 상태로 남겨 두지 못한다.
+		const AActor* Holder = Existing->Get();
+		if (!Holder || Holder == Expected)
+		{
+			Occupants.Remove(Index);
+		}
+	}
+}
+
+void AGridActor::ClearAllOccupantsOf(const AActor* Occupant)
+{
+	for (auto It = Occupants.CreateIterator(); It; ++It)
+	{
+		const AActor* Holder = It.Value().Get();
+		if (!Holder || Holder == Occupant)
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+AActor* AGridActor::GetOccupant(FIntPoint Cell) const
+{
+	if (!IsValidCell(Cell))
+	{
+		return nullptr;
+	}
+
+	const TWeakObjectPtr<AActor>* Existing = Occupants.Find(CellToIndex(Cell));
+	return Existing ? Existing->Get() : nullptr;
+}
+
+bool AGridActor::IsCellOccupied(FIntPoint Cell, const AActor* Ignore) const
+{
+	const AActor* Holder = GetOccupant(Cell);
+	return Holder != nullptr && Holder != Ignore;
+}
+
 bool AGridActor::CanPawnEnter(FIntPoint Cell, const APawn* Pawn, FText* OutDeniedMessage) const
 {
 	const FGridCellData* Data = GetCell(Cell);
 	if (!Data || !IsCellWalkableStatic(Cell))
+	{
+		if (OutDeniedMessage)
+		{
+			*OutDeniedMessage = DescribeCell(Cell, Pawn);
+		}
+		return false;
+	}
+
+	// Conditional 규칙보다 먼저 검사한다. 어차피 블록이 서 있는 셀에 대해서는 규칙이 절대
+	// 실행되지 않도록 -- 규칙은 경로 탐색 한 번에 여러 번 호출된다.
+	// 통과 태그가 붙은 폰(행인 NPC)에게는 점유자가 없는 것과 같다.
+	if (!PawnPassesThroughOccupants(Pawn) && IsCellOccupied(Cell))
 	{
 		if (OutDeniedMessage)
 		{
@@ -97,6 +195,24 @@ FText AGridActor::DescribeCell(FIntPoint Cell, const APawn* Pawn) const
 		return NSLOCTEXT("LTTSGrid", "CellOffGrid", "Outside the grid.");
 	}
 
+	if (!IsCellWalkableStatic(Cell))
+	{
+		const UEnum* ReasonEnum = StaticEnum<EGridBlockReason>();
+		return ReasonEnum
+			? ReasonEnum->GetDisplayNameTextByValue(static_cast<int64>(Data->BlockReason))
+			: NSLOCTEXT("LTTSGrid", "CellBlocked", "Blocked.");
+	}
+
+	// 셀이 아니라 enum에서 직접 가져와 보고한다: 이유가 런타임 점유자이므로 BlockReason에는
+	// 절대 저장되지 않는다. CanPawnEnter와 같은 조건이어야 거부 문구가 실제 거부 사유와 맞는다.
+	if (!PawnPassesThroughOccupants(Pawn) && IsCellOccupied(Cell))
+	{
+		const UEnum* ReasonEnum = StaticEnum<EGridBlockReason>();
+		return ReasonEnum
+			? ReasonEnum->GetDisplayNameTextByValue(static_cast<int64>(EGridBlockReason::Object))
+			: NSLOCTEXT("LTTSGrid", "CellOccupied", "Blocked by object.");
+	}
+
 	if (Data->Type == EGridCellType::Conditional && ConditionalRules.IsValidIndex(Data->RuleIndex))
 	{
 		if (const UGridCellRule* Rule = ConditionalRules[Data->RuleIndex])
@@ -108,15 +224,7 @@ FText AGridActor::DescribeCell(FIntPoint Cell, const APawn* Pawn) const
 		}
 	}
 
-	if (IsCellWalkableStatic(Cell))
-	{
-		return FText::GetEmpty();
-	}
-
-	const UEnum* ReasonEnum = StaticEnum<EGridBlockReason>();
-	return ReasonEnum
-		? ReasonEnum->GetDisplayNameTextByValue(static_cast<int64>(Data->BlockReason))
-		: NSLOCTEXT("LTTSGrid", "CellBlocked", "Blocked.");
+	return FText::GetEmpty();
 }
 
 bool AGridActor::FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const APawn* Pawn, FIntPoint& OutCell) const
@@ -127,8 +235,8 @@ bool AGridActor::FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const 
 		return true;
 	}
 
-	// Expanding square rings. Not a true nearest-by-distance search, but on a uniform grid
-	// the difference never exceeds one cell and this needs no sorting.
+	// 정사각형 링을 넓혀 간다. 거리 기준의 엄밀한 최근접 탐색은 아니지만, 균일한 그리드에서는
+	// 차이가 한 셀을 넘지 않고 정렬도 필요 없다.
 	for (int32 Radius = 1; Radius <= MaxRadius; ++Radius)
 	{
 		for (int32 OffsetY = -Radius; OffsetY <= Radius; ++OffsetY)
@@ -137,7 +245,7 @@ bool AGridActor::FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const 
 			{
 				if (FMath::Max(FMath::Abs(OffsetX), FMath::Abs(OffsetY)) != Radius)
 				{
-					continue;	// interior of the ring was covered by a smaller radius
+					continue;	// 링 안쪽은 더 작은 반경에서 이미 다뤘다
 				}
 
 				const FIntPoint Candidate(From.X + OffsetX, From.Y + OffsetY);
@@ -147,6 +255,69 @@ bool AGridActor::FindNearestWalkableCell(FIntPoint From, int32 MaxRadius, const 
 					return true;
 				}
 			}
+		}
+	}
+
+	return false;
+}
+
+bool AGridActor::FindEntryCell(const FVector& FromWorld, int32 MaxRadius, const APawn* Pawn,
+	const TOptional<FIntPoint>& Goal, FIntPoint& OutCell) const
+{
+	const FIntPoint FromCell = WorldToCell(FromWorld);
+	if (CanPawnEnter(FromCell, Pawn))
+	{
+		OutCell = FromCell;
+		return true;
+	}
+
+	for (int32 Radius = 1; Radius <= MaxRadius; ++Radius)
+	{
+		FIntPoint Best = FIntPoint::ZeroValue;
+		double BestDistanceSq = TNumericLimits<double>::Max();
+		bool bFound = false;
+
+		for (int32 OffsetY = -Radius; OffsetY <= Radius; ++OffsetY)
+		{
+			for (int32 OffsetX = -Radius; OffsetX <= Radius; ++OffsetX)
+			{
+				if (FMath::Max(FMath::Abs(OffsetX), FMath::Abs(OffsetY)) != Radius)
+				{
+					continue;	// 링 안쪽은 더 작은 반경에서 이미 다뤘다
+				}
+
+				const FIntPoint Candidate(FromCell.X + OffsetX, FromCell.Y + OffsetY);
+				if (!CanPawnEnter(Candidate, Pawn))
+				{
+					continue;
+				}
+
+				// 목적지가 있으면 거기까지 이어지는 셀만 받는다. 그러지 않으면 선로 건너편
+				// 같은 고립된 섬으로 걸어 들어가 영영 못 나온다.
+				if (Goal.IsSet() && Candidate != Goal.GetValue())
+				{
+					TArray<FIntPoint> Probe;
+					if (!FindPath(Candidate, Goal.GetValue(), Pawn, Probe))
+					{
+						continue;
+					}
+				}
+
+				const double DistanceSq = FVector::DistSquared2D(CellToWorld(Candidate), FromWorld);
+				if (DistanceSq < BestDistanceSq)
+				{
+					BestDistanceSq = DistanceSq;
+					Best = Candidate;
+					bFound = true;
+				}
+			}
+		}
+
+		// 한 반경 안에서 최선을 고르고 끝낸다. 더 넓은 링에는 더 가까운 셀이 있을 수 없다.
+		if (bFound)
+		{
+			OutCell = Best;
+			return true;
 		}
 	}
 
@@ -183,7 +354,7 @@ AGridActor* AGridActor::FindGrid(const UWorld* World)
 	return nullptr;
 }
 
-// ---------------------------------------------------------------------------- Generation
+// ---------------------------------------------------------------------------- 생성
 
 void AGridActor::GenerateFromTraces()
 {
@@ -208,9 +379,13 @@ void AGridActor::GenerateFromTraces()
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(LTTSGridGen), /*bTraceComplex*/ false, this);
 
-	// Markers carry no collision, but ignoring every editor-only actor also covers any
-	// visualiser someone adds later. In a game world (bRegenerateOnPlay) ignore pawns
-	// instead, so a pawn standing on the floor cannot mask the floor under itself.
+	// 마커에는 콜리전이 없지만, 에디터 전용 액터를 전부 무시해 두면 나중에 누군가 추가할
+	// 시각화 액터까지 함께 걸러진다. 게임 월드(bRegenerateOnPlay)에서는 대신 폰을 무시해,
+	// 바닥에 서 있는 폰이 자기 발밑 바닥을 가리지 못하게 한다.
+	//
+	// 태그가 붙은 액터는 움직이는 소품 -- 퍼즐 블록이다. 바닥 위에 서 있으므로 그냥 두면
+	// 배치된 그 위치에서 자기 자신을 Blocked 셀로 구워 넣게 된다. 그래서 그 아래 바닥은
+	// 블록이 없는 것처럼 트레이스해야 한다.
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
@@ -218,7 +393,7 @@ void AGridActor::GenerateFromTraces()
 		{
 			continue;
 		}
-		if (Actor->IsEditorOnly() || Actor->IsA<APawn>())
+		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()))
 		{
 			Params.AddIgnoredActor(Actor);
 		}
@@ -248,9 +423,9 @@ void AGridActor::GenerateFromTraces()
 				continue;
 			}
 
-			// The trace started inside geometry -- a wall or column that passes through the
-			// top of the region. There is no headroom here at all, and the reported impact
-			// point and normal are the trace start, not a surface, so they cannot be used.
+			// 트레이스가 지오메트리 안에서 시작했다 -- 영역 꼭대기를 관통하는 벽이나 기둥이다.
+			// 여기에는 머리 위 공간이 전혀 없고, 보고된 충돌 지점과 노멀은 표면이 아니라
+			// 트레이스 시작점이므로 쓸 수 없다.
 			if (Hit.bStartPenetrating)
 			{
 				Cell.FloorZ = static_cast<float>(TraceTop);
@@ -274,7 +449,7 @@ void AGridActor::GenerateFromTraces()
 
 			if (bClearanceTest && ClearanceHeight > MaxStepHeight)
 			{
-				// Start the box above MaxStepHeight so a ramp or a small lip cannot block itself.
+				// 박스를 MaxStepHeight 위에서 시작해, 경사로나 작은 턱이 자기 자신을 막지 못하게 한다.
 				const double BoxHalfHeight = (ClearanceHeight - MaxStepHeight) * 0.5;
 				const FVector BoxCentre(CentreX, CentreY, Cell.FloorZ + MaxStepHeight + BoxHalfHeight);
 				const FCollisionShape Box = FCollisionShape::MakeBox(
@@ -308,16 +483,16 @@ void AGridActor::BuildAdjacency()
 		}
 	}
 
-	// Only +X and +Y are examined; each connection is written to both endpoints, so the
-	// mask is symmetric by construction and no one-way links can appear.
+	// +X와 +Y만 검사한다. 연결 하나를 양쪽 끝점 모두에 기록하므로 마스크는 구조적으로
+	// 대칭이고 단방향 링크는 생길 수 없다.
 	//
-	// A flat step and a ramp both show up as a height difference, but only the step is a
-	// discontinuity you have to climb. On a ramp the rise is the surface itself: at
-	// MaxSlopeAngle 35 degrees a 1 m cell already rises 70 cm, which the step rule alone
-	// would sever, cutting every ramp into disconnected strips. So the allowance grows with
-	// the *shallower* of the two cells' slopes -- two ramp cells get the ramp's own rise plus
-	// the step budget, while a ramp next to flat ground still only gets the step budget and
-	// cannot bridge a drop.
+	// 평평한 단차와 경사로는 둘 다 높이 차이로 나타나지만, 올라서야 하는
+	// 불연속은 단차뿐이다. 경사로에서는 상승분이 표면 그 자체다: MaxSlopeAngle
+	// 35도에서 1 m 셀은 이미 70 cm 올라가는데, 단차 규칙만으로는 이것이 끊겨
+	// 모든 경사로가 서로 떨어진 띠로 잘린다. 그래서 허용치는 두 셀 중 *더 완만한*
+	// 쪽의 경사에 따라 커진다 -- 경사로 셀 두 개는 경사로 자체의 상승분에 단차
+	// 여유를 더해 받지만, 평지 옆의 경사로는 여전히 단차 여유만 받으므로 낙차를
+	// 건널 수 없다.
 	const auto MaxNeighborDelta = [this](const FGridCellData& A, const FGridCellData& B)
 	{
 		const float SharedSlopeDeg = FMath::Min(A.SlopeDeg, B.SlopeDeg);
@@ -376,7 +551,7 @@ void AGridActor::ApplyStoredOverrides()
 {
 	NumOverridesApplied = 0;
 
-	// Start from what tracing found, so removing a marker reverts its cells exactly.
+	// 트레이스 결과에서 다시 시작한다. 그래야 마커를 지우면 그 셀들이 정확히 원래대로 돌아간다.
 	for (FGridCellData& Cell : Cells)
 	{
 		Cell.Type = Cell.GeneratedType;
@@ -394,8 +569,8 @@ void AGridActor::ApplyStoredOverrides()
 
 		FGridCellData& Cell = Cells[Index];
 
-		// A cell with no floor has no Z to stand on, so making it walkable would teleport
-		// the pawn to the grid origin height. Refuse it and say so.
+		// 바닥이 없는 셀에는 설 수 있는 Z가 없으므로, 걸을 수 있게 만들면 폰이 그리드 원점
+		// 높이로 순간이동한다. 거부하고 로그로 알린다.
 		if (Cell.GeneratedType == EGridCellType::NoFloor && Override.Type != EGridCellType::Blocked)
 		{
 			UE_LOG(LogLTTSGrid, Warning,
@@ -449,7 +624,7 @@ void AGridActor::RefreshDebugDraw()
 	}
 }
 
-// ---------------------------------------------------------------------------- Editor actions
+// ---------------------------------------------------------------------------- 에디터 동작
 
 void AGridActor::GenerateGrid()
 {
@@ -481,15 +656,15 @@ void AGridActor::ApplyOverrides()
 {
 	if (Cells.Num() != SizeInCells.X * SizeInCells.Y)
 	{
-		// Nothing to stamp onto -- fall back to a full generate.
+		// 찍어 넣을 대상이 없다 -- 전체 생성으로 대체한다.
 		GenerateGrid();
 		return;
 	}
 
 	Modify();
 
-	// No traces here: ApplyStoredOverrides rebuilds every cell from its generated state,
-	// so this is just the bake-and-stamp half of GenerateGrid.
+	// 여기서는 트레이스하지 않는다: ApplyStoredOverrides가 모든 셀을 생성 상태에서 다시
+	// 만들므로, 이것은 GenerateGrid의 굽고-찍는 절반에 해당한다.
 #if WITH_EDITOR
 	BakeOverridesFromMarkers();
 #endif
@@ -553,8 +728,8 @@ void AGridActor::LogDebugReport()
 			DebugInspectCell.X, DebugInspectCell.Y);
 	}
 
-	// Rules are evaluated with a null pawn here, so a Conditional cell reports whatever its
-	// rule says about "nobody" -- enough to prove the path search reaches it.
+	// 여기서는 규칙을 null 폰으로 평가하므로, Conditional 셀은 규칙이 "아무도 아님"에 대해
+	// 답하는 대로 보고한다 -- 경로 탐색이 거기까지 닿는지 확인하기에는 충분하다.
 	TArray<FIntPoint> TestPath;
 	const double StartTime = FPlatformTime::Seconds();
 	const bool bFound = FindPath(DebugPathStart, DebugPathGoal, nullptr, TestPath);
@@ -572,14 +747,14 @@ void AGridActor::LogDebugReport()
 	}
 }
 
-// ---------------------------------------------------------------------------- Lifecycle
+// ---------------------------------------------------------------------------- 라이프사이클
 
 void AGridActor::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	// Runs inside SpawnActor / InitializeActorsForPlay, so the grid is queryable before any
-	// BeginPlay -- the pawn reads it the moment it spawns.
+	// SpawnActor / InitializeActorsForPlay 안에서 실행되므로, 어떤 BeginPlay보다 먼저
+	// 그리드에 질의할 수 있다 -- 폰은 스폰되는 순간 그리드를 읽는다.
 	if (GetWorld() && GetWorld()->IsGameWorld() && bRegenerateOnPlay)
 	{
 		GenerateFromTraces();
@@ -636,7 +811,7 @@ void AGridActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEv
 	}
 	else if (ReportProperties.Contains(MemberName))
 	{
-		// Editing an inspection field is a request to see the answer, so skip the button.
+		// 검사용 필드를 편집했다는 것은 답을 보고 싶다는 뜻이므로 버튼을 거치지 않는다.
 		LogDebugReport();
 	}
 	else
@@ -649,8 +824,8 @@ void AGridActor::PostEditMove(bool bFinished)
 {
 	Super::PostEditMove(bFinished);
 
-	// The origin moved, so every cell's world position changed. Only regenerate once the
-	// drag is over -- 6400 traces per mouse-move frame would be unusable.
+	// 원점이 움직였으니 모든 셀의 월드 위치가 바뀌었다. 드래그가 끝난 뒤에만 다시 생성한다
+	// -- 마우스 이동 프레임마다 트레이스 6400번은 쓸 수 없는 수준이다.
 	if (bFinished && bAutoRegenerateOnEdit)
 	{
 		GenerateGrid();
@@ -673,7 +848,7 @@ void AGridActor::OnMarkerChanged()
 
 	if (Cells.Num() != SizeInCells.X * SizeInCells.Y)
 	{
-		return;		// nothing generated yet; the designer has to press Generate Grid first
+		return;		// 아직 생성된 것이 없다. 디자이너가 먼저 Generate Grid를 눌러야 한다
 	}
 
 	TGuardValue<bool> Guard(bIsApplyingOverrides, true);
@@ -700,10 +875,10 @@ void AGridActor::BakeOverridesFromMarkers()
 		}
 	}
 
-	// TActorIterator order is not stable between sessions, and overlapping markers resolve
-	// by "later wins", so the order has to be pinned down or the baked result would differ
-	// run to run. Priority first, then single-cell markers over box markers (a small fix on
-	// top of a broad region is the common intent), then name as a final tiebreak.
+	// TActorIterator 순서는 세션마다 달라질 수 있고, 겹치는 마커는 "뒤쪽이 이긴다"로
+	// 해결되므로, 순서를 고정하지 않으면 구운 결과가 실행할 때마다 달라진다. Priority가
+	// 먼저, 그다음 단일 셀 마커가 박스 마커보다 우선(넓은 영역 위에 작은 수정을 얹는 것이
+	// 흔한 의도), 마지막으로 이름으로 순서를 정한다.
 	Markers.Sort([](const AGridCellMarkerBase& A, const AGridCellMarkerBase& B)
 	{
 		if (A.Priority != B.Priority)
@@ -727,8 +902,8 @@ void AGridActor::BakeOverridesFromMarkers()
 			continue;
 		}
 
-		// Markers are editor-only and vanish on cook, so the rule object has to be copied
-		// onto the grid. One copy per marker, shared by all the cells it covers.
+		// 마커는 에디터 전용이라 쿡하면 사라지므로, 규칙 오브젝트를 그리드로 복사해 둬야 한다.
+		// 마커당 복사본 하나를 만들고, 마커가 덮는 모든 셀이 공유한다.
 		int32 RuleIndex = INDEX_NONE;
 		if (Marker->CellType == EGridCellType::Conditional)
 		{
