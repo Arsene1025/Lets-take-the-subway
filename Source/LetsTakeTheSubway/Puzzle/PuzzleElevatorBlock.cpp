@@ -4,6 +4,8 @@
 
 #include "LetsTakeTheSubway.h"
 #include "Grid/GridActor.h"
+#include "Puzzle/PuzzleElevatorDock.h"
+#include "Puzzle/PuzzleSubsystem.h"
 #include "Player/GridPawn.h"
 
 #include "Components/StaticMeshComponent.h"
@@ -361,11 +363,21 @@ bool APuzzleElevatorBlock::CanOccupyRect(const FGridRect& Rect, FText* OutReason
 
 	// 위층으로 올라간 차체는 그 층의 바닥 위로만 나갈 수 있다. 셀은 층마다 높이가 하나뿐이라
 	// 이 검사가 없으면 차체가 샤프트 셀로 되돌아가면서 원래 층 높이로 뚝 떨어진다.
+	const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+
 	TArray<FIntPoint> Cells;
 	Rect.GatherCells(Cells);
 
 	for (const FIntPoint& Cell : Cells)
 	{
+		// 구조물이 덮은 셀은 샤프트다. 샤프트 바닥은 아래층 높이로 구워지지만 차체는 위층에서
+		// 밀려 들어와 위층 높이에 걸린 채 멈춘다 -- 그게 엘리베이터 통로다. 셀 단위로 따지는
+		// 이유는 차체가 한 칸씩 움직여서, 밀어 넣는 동안 반드시 걸친 상태를 지나기 때문이다.
+		if (Subsystem && Subsystem->IsDockCell(Cell))
+		{
+			continue;
+		}
+
 		const FGridCellData* Data = CurrentGrid->GetCell(Cell);
 		if (!Data)
 		{

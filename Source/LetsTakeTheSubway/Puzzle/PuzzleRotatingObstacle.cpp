@@ -238,20 +238,6 @@ void APuzzleRotatingObstacle::NormaliseAuthoring()
 
 // ---------------------------------------------------------------------------- 기하
 
-FIntPoint APuzzleRotatingObstacle::LocalToWorldOffset(FIntPoint Local) const
-{
-	FIntPoint Point = Local;
-	FIntPoint Size = FootprintSize;
-
-	// W x H 사각형을 한 번 돌리면 로컬 (x, y)는 (H-1-y, x)로 가고 두 변이 맞바뀐다.
-	for (int32 Turn = 0; Turn < GetQuarterTurns(); ++Turn)
-	{
-		Point = FIntPoint(Size.Y - 1 - Point.Y, Point.X);
-		Size = FIntPoint(Size.Y, Size.X);
-	}
-
-	return Point;
-}
 
 FGridRect APuzzleRotatingObstacle::GetWorldChannelRect() const
 {
@@ -519,6 +505,17 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 		return false;
 	}
 
+	// 저작에서 회전을 꺼 둔 구조물. 레버는 연결돼 있어도 좋다 -- 레버를 돌린 플레이어는
+	// 아무 일도 일어나지 않는 것보다 이유를 듣는 편이 낫다.
+	if (!bCanRotate)
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("LTTSPuzzle", "ObstacleFixed", "This structure does not turn.");
+		}
+		return false;
+	}
+
 	UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
 	if (!Subsystem)
 	{
@@ -538,6 +535,18 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 			if (OutReason)
 			{
 				*OutReason = NSLOCTEXT("LTTSPuzzle", "ObstacleRiderMoving", "Wait for the pieces to settle.");
+			}
+			return false;
+		}
+
+		// 붙어 있는데 돌지 않는 조각은 회전을 막는다. 그것만 제자리에 남기고 나머지를 돌리면
+		// 구조물이 그 조각을 그대로 통과해 버린다.
+		if (!Rider->bCanRotate)
+		{
+			if (OutReason)
+			{
+				*OutReason = NSLOCTEXT("LTTSPuzzle", "ObstacleRiderFixed",
+					"Something attached to the structure will not turn.");
 			}
 			return false;
 		}

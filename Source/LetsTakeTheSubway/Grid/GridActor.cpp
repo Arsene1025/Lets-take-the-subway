@@ -13,6 +13,7 @@
 #include "CollisionShape.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Engine/NavigationObjectBase.h"
 #include "GameFramework/Pawn.h"
 
 namespace
@@ -400,7 +401,10 @@ void AGridActor::GenerateFromTraces()
 		const AActor* Parent = Actor->GetParentActor();
 		const bool bParentIgnored = Parent && Parent->ActorHasTag(LTTSGrid::GenerationIgnoreTag());
 
-		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()) || bParentIgnored)
+		// PlayerStart 같은 배치용 표식(NavigationObjectBase)은 캡슐 콜리전을 갖고 있어 그 자리의
+		// 바닥으로 구워진다. 캡슐이 트레이스 시작점에 걸리면 셀이 트레이스 꼭대기 높이에 떠 버린다.
+		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->IsA<ANavigationObjectBase>()
+			|| Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()) || bParentIgnored)
 		{
 			Params.AddIgnoredActor(Actor);
 		}
@@ -792,6 +796,14 @@ void AGridActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEv
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
+
 	static const TSet<FName> GenerationProperties = {
 		GET_MEMBER_NAME_CHECKED(AGridActor, SizeInCells),
 		GET_MEMBER_NAME_CHECKED(AGridActor, RegionHeight),
@@ -829,8 +841,15 @@ void AGridActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEv
 
 void AGridActor::PostEditMove(bool bFinished)
 {
-	Super::PostEditMove(bFinished);
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
 
+	Super::PostEditMove(bFinished);
 	// 원점이 움직였으니 모든 셀의 월드 위치가 바뀌었다. 드래그가 끝난 뒤에만 다시 생성한다
 	// -- 마우스 이동 프레임마다 트레이스 6400번은 쓸 수 없는 수준이다.
 	if (bFinished && bAutoRegenerateOnEdit)
@@ -917,6 +936,12 @@ void AGridActor::BakeOverridesFromMarkers()
 			if (Marker->Rule)
 			{
 				RuleIndex = ConditionalRules.Add(DuplicateObject<UGridCellRule>(Marker->Rule, this));
+			}
+			else if (Marker->RuleClass)
+			{
+				// 인스턴스가 없으면 클래스 기본값으로 하나 만든다. 배치 자동화가 Instanced
+				// 서브오브젝트를 만들 수 없어서 열어 둔 길이다.
+				RuleIndex = ConditionalRules.Add(NewObject<UGridCellRule>(this, Marker->RuleClass));
 			}
 			else
 			{

@@ -168,7 +168,13 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 		// 없는 셈 치고 뒤쪽 바닥을 클릭하게 둔다 -- 차체가 승강장 셀을 통째로 가리기 때문이다.
 		if (AGridTrain* Train = Cast<AGridTrain>(Hit.GetActor()))
 		{
-			if (Train->CanBoard(GetGridPawn()))
+			FText Refusal;
+			if (!Train->CanBoard(GetGridPawn(), &Refusal))
+			{
+				// 잡지는 않되 사유는 들고 간다. 바닥 픽으로 넘어간 뒤 누름이 처리될 때 띄운다.
+				Pick.VehicleRefusal = Refusal;
+			}
+			else
 			{
 				Pick.Kind = FCursorPick::EKind::Vehicle;
 				Pick.Vehicle = Train;
@@ -401,6 +407,13 @@ void AGridPlayerController::OnPressed()
 
 	if (Pick.Kind == FCursorPick::EKind::Floor)
 	{
+		// 커서 아래에 열차가 있었는데 탈 수 없었다면 그 이유부터 알려 준다. 걷는 동작은
+		// 그대로다 -- 승강장 셀을 클릭하려던 것일 수도 있기 때문이다.
+		if (!Pick.VehicleRefusal.IsEmpty())
+		{
+			ShowFeedback(Pick.VehicleRefusal.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+
 		// 바닥에는 끌 것이 없으므로 누르는 즉시 처리한다. 뗄 때까지 기다리면 응답만 늦다.
 		MovePawnToCell(Pick.Cell);
 		return;
@@ -803,6 +816,14 @@ void AGridPlayerController::FinishDrag()
 	if (Block->IsA<APuzzleRotatingObstacle>())
 	{
 		ShowFeedback(TEXT("This turns only when its lever is turned."), FLinearColor::White);
+		return;
+	}
+
+	// 저작에서 고정해 둔 물건. 축 문구("moves nowhere")는 규칙을 설명하지 못하므로 먼저
+	// 가로챈다 -- 플레이어가 알아야 하는 것은 "이 벤치는 붙박이다"이지 축이 아니다.
+	if (!Block->bCanMove)
+	{
+		ShowFeedback(TEXT("This object is fixed in place."), FLinearColor::White);
 		return;
 	}
 

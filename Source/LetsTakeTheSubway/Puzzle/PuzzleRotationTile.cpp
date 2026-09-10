@@ -154,6 +154,19 @@ bool APuzzleRotationTile::TryRotate(FText* OutReason)
 			continue;
 		}
 
+		// 타일 위에 올라와 있으면서 돌지 않는 조각은 회전 전체를 막는다. 그것만 빼고 돌리면
+		// 남은 조각이 그 자리로 들어와 겹친다.
+		if (!Block->bCanRotate)
+		{
+			if (OutReason)
+			{
+				*OutReason = FText::Format(
+					NSLOCTEXT("LTTSPuzzle", "TileBlockFixed", "Cannot rotate: {0} does not turn."),
+					FText::FromString(Block->GetName()));
+			}
+			return false;
+		}
+
 		const FGridRect Destination = GridFootprint::RotateRect(Block->GetRect(), Region, TurnSign);
 
 		TArray<FIntPoint> Cells;
