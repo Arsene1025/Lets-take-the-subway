@@ -13,6 +13,7 @@ class AGridEscalator;
 class AGridPawn;
 class AGridTrain;
 class APuzzleBlock;
+class APuzzleElevatorBlock;
 class APuzzleLever;
 class UInputAction;
 class UInputMappingContext;
@@ -67,6 +68,46 @@ struct FCursorPick
 
 	/** 블록 뒤에서 바닥을 찾지 못했다면(그리드 밖 등) FloorCell은 의미가 없다. */
 	bool bHasFloorCell = false;
+
+	/**
+	 * 커서 아래에 열차가 있었지만 지금 탈 수 없을 때, 그 이유.
+	 *
+	 * 열차는 탈 수 있을 때만 잡히므로 거부 사유가 화면에 닿을 길이 없었다. 문 앞에서
+	 * 눌러도 폰이 그냥 뒤쪽 바닥으로 걸어가고 왜 안 탔는지 알 수 없었다. 픽을 바꾸지
+	 * 않고(차체가 승강장 셀을 가리므로 그 규칙은 옳다) 사유만 함께 들고 나온다.
+	 */
+	FText VehicleRefusal;
+};
+
+/**
+ * 눌러 둔 탈것과, 그것을 타려고 걸어가는 문 앞 셀.
+ *
+ * 탑승은 원래 "문 앞 셀에 서서 클릭"이었다. 어디에 서야 하는지 화면에 아무 표시도 없어서
+ * 플레이어는 차체를 눌러 보고, 아무 일도 일어나지 않는 것을 보고, 승강장을 더듬어야 했다.
+ * 이제 클릭은 "타겠다"는 뜻이고 문 앞까지 걸어가는 것은 폰의 일이다.
+ *
+ * 예약이 컨트롤러에 사는 이유는 이것이 조작의 상태이기 때문이다. 탈것은 자기를 타려고
+ * 누가 걸어오고 있는지 알 필요가 없고, 폰은 자기가 왜 그 셀로 가는지 알 필요가 없다.
+ */
+struct FPendingBoarding
+{
+	enum class EKind : uint8
+	{
+		None,
+		Elevator,
+		Train
+	};
+
+	EKind Kind = EKind::None;
+
+	/** APuzzleElevatorBlock 또는 AGridTrain. */
+	TWeakObjectPtr<AActor> Target;
+
+	/** 걸어가고 있는(또는 이미 서 있는) 문 앞 셀. */
+	FIntPoint DoorCell = FIntPoint::ZeroValue;
+
+	/** 기다리는 이유를 이미 한 번 알렸는지. 매 프레임 같은 줄을 다시 쓰지 않기 위해서다. */
+	bool bWaitReported = false;
 };
 
 /**
@@ -106,6 +147,16 @@ public:
 
 	/** 커서가 무엇 위에 있는지: 블록, 레버, 열차, 바닥 셀, 또는 아무것도 없음. */
 	FCursorPick PickUnderCursor() const;
+
+	/**
+	 * "저 엘리베이터를 타겠다"는 요청. 차체를 클릭하는 것과 같은 뜻이다.
+	 *
+	 * 클릭 경로와 콘솔 명령(ltts.ElevatorRide)이 이 하나를 공유한다. 시험용 경로가 실제
+	 * 경로와 갈라지면 시험이 증명하는 것이 없어진다.
+	 *
+	 * @return 폰이 문 앞으로 출발했거나 그 자리에서 탔으면 true. 거절 사유는 화면에 띄운다.
+	 */
+	bool RequestElevatorBoarding(APuzzleElevatorBlock* Elevator);
 
 	bool IsDraggingBlock() const { return DraggedBlock.IsValid(); }
 
@@ -147,6 +198,27 @@ private:
 	/** 바닥 셀 하나로 가라는 명령. 막힌 옆 칸이면 부딪히는 연출을 먼저 낸다. */
 	void MovePawnToCell(const FIntPoint& Cell);
 
+	// ---------------------------------------------------------------- 예약 탑승
+
+	/**
+	 * 탈것을 타기로 한다. 가장 가까운 문 앞으로 걸어가고, 닿으면 자동으로 탄다.
+	 *
+	 * 이미 문 앞에 서 있으면 한 프레임도 기다리지 않고 그 자리에서 태운다 -- 예전처럼
+	 * 문 앞에서 누른 플레이어에게는 아무것도 달라지지 않아야 한다.
+	 */
+	bool BeginPendingBoarding(FPendingBoarding::EKind Kind, AActor* Target, const TArray<FIntPoint>& DoorCells);
+
+	/** 예약을 버린다. 걷고 있던 폰은 가던 길을 그대로 간다. */
+	void CancelPendingBoarding(const FString& Reason = FString());
+
+	/** 폰이 문 앞에 닿았는지 보고, 닿았으면 태운다. 매 틱 돈다. */
+	void UpdatePendingBoarding();
+
+	/** 지금 태울 수 있으면 태운다. 아직이면 false -- 열차는 기다리면 오므로 예약은 남는다. */
+	bool TryCompleteBoarding();
+
+	bool HasPendingBoarding() const { return Pending.Kind != FPendingBoarding::EKind::None; }
+
 	/** 커서를 따라가며 쥔 블록을 그쪽으로 한 스텝씩 옮긴다. */
 	void UpdateDrag();
 
@@ -175,6 +247,9 @@ private:
 
 	FString FeedbackText;
 	FLinearColor FeedbackColor = FLinearColor::White;
+
+	/** 지금 걸어가서 타기로 한 탈것. 없으면 Kind가 None이다. */
+	FPendingBoarding Pending;
 
 	FIntPoint LastHoveredCell = FIntPoint(MIN_int32, MIN_int32);
 	FCursorPick::EKind LastHoverKind = FCursorPick::EKind::None;

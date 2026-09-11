@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -19,7 +19,8 @@
  * - 본체는 원기둥이라 이웃 셀을 스치지 않는다. 회전 경로 검사는 동승 블록만 대상으로
  *   하므로, 부착 면이 아닌 쪽에 붙어 있는 블록은 회전을 막지 않고 그 자리에 남는다.
  *
- * 풋프린트는 1x1로 고정한다. 기둥의 중심이 곧 셀 중심이므로 홀짝 규칙은 저절로 만족한다.
+ * 풋프린트는 **정사각형**이면 된다(기본 1x1). 두 변이 같으면 홀짝 규칙이 저절로 만족되고
+ * 회전 정사각형이 풋프린트와 정확히 겹친다. 2 m짜리 아트 기둥은 2x2로 둔다.
  * 높이는 기본 4 m(셀 4칸)이며 프로퍼티로 조정한다.
  */
 UCLASS(HideCategories = (Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, Replication))

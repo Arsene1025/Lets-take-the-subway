@@ -180,8 +180,15 @@ void APuzzleRegion::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void APuzzleRegion::PostEditMove(bool bFinished)
 {
-	Super::PostEditMove(bFinished);
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
 
+	Super::PostEditMove(bFinished);
 	if (!bFinished)
 	{
 		return;
@@ -210,6 +217,14 @@ void APuzzleRegion::PostEditMove(bool bFinished)
 void APuzzleRegion::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
 
 	RefreshVisual();
 	PostEditMove(true);

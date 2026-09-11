@@ -138,8 +138,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
 	float CameraArmLength = 1800.0f;
 
+	/**
+	 * 카메라가 내려다보는 방향. 스프링암의 월드 회전으로 그대로 들어간다.
+	 *
+	 * 아트가 레벨에 놓아 둔 고정 카메라(`CAM_ToonIso`, `CAM_Isometric`)와 같은 값이다.
+	 * pitch -35.264도는 정사각 아이소메트릭 각(atan(1/√2))이고, yaw -135도는 역을 북동쪽에서
+	 * 내려다본다. 이전 값(-55, 45)은 반대편인 남서쪽에서 보는 것이라 승강장 벽이 화면 앞을
+	 * 가려 그 뒤의 셀을 클릭할 수 없었다.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
-	FRotator CameraRotation = FRotator(-55.0f, 45.0f, 0.0f);
+	FRotator CameraRotation = FRotator(-35.264f, -135.0f, 0.0f);
 
 	/** 부딪힘 연출에서 막힌 쪽으로 나갔다 오는 거리(cm). */
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Feedback", meta = (ClampMin = 0.0))

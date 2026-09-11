@@ -1,4 +1,4 @@
-# 역 전체 흐름 — 퍼즐 구간 · 엘리베이터 승강 · 열차 · 행인 승하차 · FlowTest_1 맵
+﻿# 역 전체 흐름 — 퍼즐 구간 · 엘리베이터 승강 · 열차 · 행인 승하차 · FlowTest_1 맵
 
 작성일 2026-09-08. 출처: `지하철을타자 설명자료-260908.pdf`(기획, 5쪽) + 사용자 추가 요청 3건(채팅).
 대상 레벨: 신규 테스트 맵 `Content/Maps/FlowTest_1`(5절). 검증 뒤 `GreyBoxTest_1`에 적용.
@@ -141,6 +141,10 @@ C를 기본으로 하고, `TargetFloorCell`이 비어 있으면 A의 `TravelHeig
 
 ### 3.3 `Puzzle/PuzzleElevatorDock.h/.cpp` — `APuzzleElevatorDock : APuzzleFloorTile` (엘리베이터 구조물)
 
+> **2026-09-11: 저작 방식이 바뀌었다.** 목표 층은 이제 셀 번호가 아니라 **층마다 하나씩 놓고 서로를
+> 가리키는 Dock**(`TargetDock`)에서 나온다. 아래 `TargetFloorCell`·`TravelHeight` 설명은 `TargetDock`이
+> 비어 있을 때의 예비 경로로만 유효하다. 새 설계는 `BoardingRefactor.md` 2.3절을 본다.
+
 - 저작: `TargetFloorCell`(FIntPoint, 1.2절 C), `TravelHeight = 800`(셀 미지정 시), `ExitDirection`
   (EGridDirection, 도착 층에서 내릴 문), `TravelSpeed = 200 cm/s`, `DoorDwellSeconds = 0.5`
   (도착 후 하차까지), `bReturnAfterUnboard = false`.
@@ -203,7 +207,8 @@ C를 기본으로 하고, `TargetFloorCell`이 비어 있으면 A의 `TravelHeig
 - 저작: `Speed = 1200 cm/s`, `DoorOpenSeconds = 5`(기획값, 조정 가능), `LoopInterval = 20`(연출용: 문
   닫고 떠난 뒤 다음 정차까지), `bLoop = true`(마지막 정차역 뒤 첫 역으로), `bDepartAfterBoarding = true`
   (플레이어가 타면 남은 대기 없이 문을 닫는다).
-- 상태기계: `Approaching → DoorsOpen(타이머) → DoorsClosing → Moving → Approaching …`.
+- 상태기계: `Approaching → DoorsOpening(연출) → DoorsOpen(타이머) → DoorsClosing → Moving → Approaching …`.
+  `DoorsOpening`과 `DoorsClosing`은 문 애니메이션 시간이고 그 동안에는 아무도 타고 내리지 못한다.
   `DoorsOpen` 진입 시 `OnDoorsOpened(StopIndex)` 델리게이트 + `DisembarkSpawner->SpawnBurst(DisembarkCount, 0.6)`.
   플레이어가 타고 있으면 스포너 버스트도 그대로(행인이 같이 내린다).
 - `TryBoard(AGridPawn*, FText*)`: 문이 열려 있고(`DoorsOpen`), 폰이 정지해 있고, 현재 정차역의
@@ -308,8 +313,10 @@ C를 기본으로 하고, `TargetFloorCell`이 비어 있으면 A의 `TravelHeig
 ### 4.2 열차 (연출 + 승하차)
 
 ```
-Approaching(스플라인 이동) → 정차 → DoorsOpen: OnDoorsOpened → 행인 버스트, 탑승자 하차(WalkOntoGrid)
- → DoorOpenSeconds 대기(플레이어 탑승 시 bDepartAfterBoarding면 즉시) → DoorsClosing
+Approaching(스플라인 이동) → 정차 → DoorsOpening(DoorOpeningSeconds, 승하차 막힘)
+ → DoorsOpen: OnDoorsOpened → 행인 버스트, 탑승자 하차(WalkOntoGrid)
+ → DoorOpenSeconds 대기(플레이어 탑승 시 bDepartAfterBoarding면 즉시)
+ → DoorsClosing(DoorCloseSeconds, 승하차 막힘)
  → Moving(다음 정차역까지) → 반복. bLoop면 마지막 역 뒤 첫 역.
 ```
 
@@ -465,6 +472,7 @@ Approaching(스플라인 이동) → 정차 → DoorsOpen: OnDoorsOpened → 행
 | 하차 위치 | `ExitWorldOffset`(월드 벡터) | **`ExitCell`(셀)** | 이 프로젝트의 다른 모든 저작과 같은 단위. 구조물의 `TargetFloorCell`과도 일관된다 |
 | 블록 이동 제약 | `CanSlide`에 직접 삽입 | **`CanStartMoving` + `CanOccupyRect` 가상 훅** | 구간 검사·탑승자 검사·층 높이 검사가 서로 다른 이유인데 한 함수에 몰아넣으면 파생 클래스가 끼어들 자리가 없다 |
 | 도킹 상태 | 알림으로만 갱신 | **매 틱 재판정 + 알림은 피드백용** | 차체가 도크를 벗어나는 경로가 여럿(드래그, 회전판, 승강)이라 나갈 때마다 알림을 거는 것보다 현재 상태를 보는 편이 틀릴 여지가 없다 |
+| 문 시간 | 닫히는 시간만(`DoorCloseSeconds`) | **열리는 시간도 별도 단계**(`DoorOpeningSeconds` + `DoorsOpening`) | 2026-09-10 추가. 문 애니메이션을 붙이려면 여는 연출에도 시간이 있어야 하고, 그 시간 동안 승하차가 열려 있으면 폰이 움직이는 문을 통과해 들어간다. 애니메이션 자리는 `AnimateDoorsOpening/Closing(Alpha)` 훅으로 비워 두었다 |
 | 엘리베이터 문 | 한쪽 | **양쪽(기획 반영)** | 설명자료의 "문이 양방향으로 있어 회전 방향은 중요하지 않다" |
 | 승강 방향 | 한 방향(올라가면 끝) | **왕복** | 구조물이 "차체가 지금 어느 층에 있는가"로 목표를 고른다. 한 방향뿐이면 위층에 올라간 플레이어가 되돌아올 방법이 없어 테스트 한 바퀴가 끊긴다. Q3의 절반이 이걸로 해소됐다 |
 

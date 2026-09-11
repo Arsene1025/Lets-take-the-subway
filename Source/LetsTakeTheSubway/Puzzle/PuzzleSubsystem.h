@@ -99,6 +99,14 @@ public:
 	 */
 	APuzzleElevatorDock* FindDockUnder(const APuzzleElevatorBlock& Elevator) const;
 
+	/**
+	 * 이 셀이 어느 엘리베이터 구조물 위인지. 즉 샤프트 셀인지.
+	 *
+	 * 사각 영역이 아니라 셀 하나로 묻는 이유는 차체가 한 칸씩 움직이기 때문이다. 위층에서
+	 * 샤프트로 밀어 넣는 동안 차체는 걸쳐 있는 상태를 반드시 지나간다.
+	 */
+	bool IsDockCell(FIntPoint Cell) const;
+
 	const TArray<TWeakObjectPtr<APuzzleBlock>>& GetBlocks() const { return Blocks; }
 
 	const TArray<TWeakObjectPtr<APuzzleRotatingObstacle>>& GetObstacles() const { return Obstacles; }

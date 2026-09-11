@@ -43,10 +43,24 @@ public:
 	/** 영역 중심의 월드 위치, 바닥 높이 기준. 회전축이자 좌석 위치다. */
 	FVector GetPivotWorld() const { return PivotWorld; }
 
+	/**
+	 * 이 타일이 놓인 층의 바닥 높이.
+	 *
+	 * 셀 하나에는 바닥이 하나뿐이라 지금까지는 층이라는 개념이 필요 없었다. 엘리베이터
+	 * 구조물을 층마다 하나씩, 같은 XY에 겹쳐 두기 시작하면서 필요해졌다: 두 구조물을
+	 * 가르는 것은 XY가 아니라 높이다.
+	 */
+	double GetFloorZ() const { return PivotWorld.Z; }
+
 	bool IsDisabled() const { return bDisabled; }
 
-	/** 블록의 모든 셀이 영역 안에 들어 있으면(완전히 포함하면) true. */
-	bool FullyContains(const APuzzleBlock& Block) const;
+	/**
+	 * 블록의 모든 셀이 영역 안에 들어 있으면(완전히 포함하면) true.
+	 *
+	 * 가상 함수인 이유는 같은 XY를 층마다 나눠 가지는 타일이 있기 때문이다. 엘리베이터
+	 * 구조물은 여기에 "블록이 나와 같은 층에 있는가"를 더한다.
+	 */
+	virtual bool FullyContains(const APuzzleBlock& Block) const;
 
 	/** 블록이 영역 일부를 덮지만 가장자리 밖으로 삐져나와 있으면(걸침) true. */
 	bool Straddles(const APuzzleBlock& Block) const;
@@ -86,6 +100,25 @@ protected:
 
 	/** 영역이 확정되고 등록까지 끝난 뒤. 파생 클래스의 추가 초기화 자리다. */
 	virtual void OnTileReady() {}
+
+	/**
+	 * 이 타일이 어느 층에 놓인 것으로 칠지.
+	 *
+	 * 기본은 지금까지처럼 영역 첫 셀의 바닥 높이다. 셀 하나에 바닥이 하나뿐이므로 그것이
+	 * 곧 층이었다. 샤프트 위에 놓이는 엘리베이터 구조물만은 다르다: 샤프트 셀은 아래층
+	 * 높이로 구워지므로, 위층 구조물까지 그 값을 쓰면 아래층으로 끌려 내려간다.
+	 *
+	 * @param PlacedZ 디자이너가 레벨에 놓은 높이. 셀에서 답을 얻을 수 없을 때의 근거다.
+	 */
+	virtual double ResolveFloorZ(const AGridActor& InGrid, FIntPoint MinCell, double PlacedZ) const;
+
+	/**
+	 * 영역이 겹치는 다른 타일과 나란히 있어도 되는지.
+	 *
+	 * 기본은 false다 -- 겹친 두 타일은 그 사이에 멈춘 블록을 서로 자기 것이라 주장하고,
+	 * 어느 쪽이 이기는지를 등록 순서가 정하게 된다. 층이 다른 엘리베이터 구조물만은 예외다.
+	 */
+	virtual bool CanCoexistWith(const APuzzleFloorTile& Other) const { return false; }
 
 	AGridActor* GetGrid() const { return Grid; }
 

@@ -3,6 +3,7 @@
 #include "Puzzle/PuzzleBlock.h"
 
 #include "LetsTakeTheSubway.h"
+#include "Art/ArtMaterialUtil.h"
 #include "Grid/GridActor.h"
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleRegion.h"
@@ -51,6 +52,16 @@ APuzzleBlock::APuzzleBlock()
 	VisualActor = CreateDefaultSubobject<UChildActorComponent>(TEXT("VisualActor"));
 	VisualActor->SetupAttachment(SceneRoot);
 
+	// 아트 스태틱 메시 자리. 메시를 지정하기 전에는 아무것도 그리지 않는다.
+	//
+	// 콜리전을 여기서 한 번 끄고 다시는 켜지 않는다. 커서 판정과 그리드 트레이스는 프록시
+	// 큐브가 전담해야 조각을 잡는 규칙이 아트 메시의 모양에 좌우되지 않는다.
+	ArtMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArtMesh"));
+	ArtMeshComponent->SetupAttachment(SceneRoot);
+	ArtMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArtMeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	ArtMeshComponent->SetGenerateOverlapEvents(false);
+
 	// 그리드는 블록 자체가 아니라 블록 아래의 바닥을 트레이스해야 한다.
 	Tags.Add(LTTSGrid::GenerationIgnoreTag());
 
@@ -71,12 +82,73 @@ FIntPoint APuzzleBlock::GetWorldFootprint() const
 
 EPuzzleMoveAxis APuzzleBlock::GetWorldMoveAxis() const
 {
+	// 고정된 조각은 축이 없다. 드래그 코드와 HUD가 모두 이 값을 읽으므로, 여기서 한 번
+	// 답해 두면 "밀 수 없다"가 잡는 순간부터 일관되게 보인다.
+	if (!bCanMove)
+	{
+		return EPuzzleMoveAxis::None;
+	}
+
 	return LTTSPuzzle::RotateAxis(MoveAxis, QuarterTurns);
+}
+
+FIntPoint APuzzleBlock::LocalToWorldOffset(FIntPoint Local) const
+{
+	FIntPoint Point = Local;
+	FIntPoint Size = FootprintSize;
+
+	// W x H 사각형을 한 번 돌리면 로컬 (x, y)는 (H-1-y, x)로 가고 두 변이 맞바뀐다.
+	for (int32 Turn = 0; Turn < GetQuarterTurns(); ++Turn)
+	{
+		Point = FIntPoint(Size.Y - 1 - Point.Y, Point.X);
+		Size = FIntPoint(Size.Y, Size.X);
+	}
+
+	return Point;
+}
+
+FGridRect APuzzleBlock::GetWorldHollowRect() const
+{
+	if (!HasHollow())
+	{
+		return FGridRect(GetRect().Min, FIntPoint::ZeroValue);
+	}
+
+	const FIntPoint LowLocal = LocalToWorldOffset(HollowOffset);
+	const FIntPoint HighLocal = LocalToWorldOffset(HollowOffset + HollowSize - FIntPoint(1, 1));
+
+	// 양 끝 모서리를 모두 변환한 뒤 다시 합친다: 홀수 번 돌면 둘의 역할이 뒤바뀌므로,
+	// 성분별 최솟값을 취하면 특수 처리 없이 어느 방향에서도 맞는다.
+	const FIntPoint MinLocal(FMath::Min(LowLocal.X, HighLocal.X), FMath::Min(LowLocal.Y, HighLocal.Y));
+	const FIntPoint Size = (GetQuarterTurns() % 2 == 0)
+		? HollowSize
+		: FIntPoint(HollowSize.Y, HollowSize.X);
+
+	return FGridRect(GetRect().Min + MinLocal, Size);
 }
 
 void APuzzleBlock::GatherOccupiedCells(TArray<FIntPoint>& OutCells) const
 {
-	GetRect().GatherCells(OutCells);
+	if (!HasHollow())
+	{
+		GetRect().GatherCells(OutCells);
+		return;
+	}
+
+	// 빈 영역은 일부러 점유하지 않는다. L자 벤치가 감싸고 있는 기둥이 그 자리에 선다.
+	const FGridRect Hollow = GetWorldHollowRect();
+
+	TArray<FIntPoint> All;
+	GetRect().GatherCells(All);
+
+	OutCells.Reserve(OutCells.Num() + All.Num());
+	for (const FIntPoint& Cell : All)
+	{
+		if (!Hollow.Contains(Cell))
+		{
+			OutCells.Add(Cell);
+		}
+	}
 }
 
 // --- CUTAWAY DISABLED 2026-09-04 ---
@@ -144,6 +216,19 @@ void APuzzleBlock::RefreshVisual()
 		// 아트 원점은 풋프린트 중심의 바닥이다. 액터 원점과 같은 규약이라 보정이 없다.
 		VisualActor->SetRelativeLocation(FVector::ZeroVector);
 		SanitiseVisualActor();
+	}
+
+	if (ArtMeshComponent)
+	{
+		if (ArtMeshComponent->GetStaticMesh() != ArtMesh)
+		{
+			ArtMeshComponent->SetStaticMesh(ArtMesh);
+		}
+
+		// 아트 원점은 풋프린트 중심의 바닥이다. 보정이 필요한 메시만 ArtMeshOffset을 쓴다.
+		ArtMeshComponent->SetRelativeTransform(ArtMeshOffset);
+		ArtMeshComponent->SetVisibility(ArtMesh != nullptr);
+		LTTSArt::ReplaceDefaultMaterials(*ArtMeshComponent, ArtFallbackMaterial);
 	}
 
 	if (!BodyMesh)
@@ -281,22 +366,13 @@ void APuzzleBlock::BeginPlay()
 	if (UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
 	{
 		RegisterWithSubsystem(*Subsystem);
-
-		// 소속 구간은 여기서 한 번 정한다. 구간이 하나도 없는 레벨(러쉬아워·회전 장애물
-		// 프로토타입)은 지금까지처럼 제한 없이 동작해야 하므로, 못 찾은 것은 오류가 아니라
-		// 경고다.
-		HomeRegion = Subsystem->FindRegionContaining(GetRect());
-		if (!HomeRegion.IsValid())
-		{
-			UE_LOG(LogLTTSGrid, Warning,
-				TEXT("%s: not inside any puzzle region; its movement is unrestricted."), *GetName());
-		}
 	}
 
+	// 소속 구간은 첫 틱에 정한다. 이유는 ResolveHomeRegion의 주석을 보라.
+
 	UE_LOG(LogLTTSGrid, Display,
-		TEXT("%s: %dx%d block at cell (%d,%d), %d quarter turn(s), region %s."),
-		*GetName(), WorldFootprint.X, WorldFootprint.Y, MinCell.X, MinCell.Y, QuarterTurns,
-		HomeRegion.IsValid() ? *HomeRegion->GetDisplayName() : TEXT("none"));
+		TEXT("%s: %dx%d block at cell (%d,%d), %d quarter turn(s)."),
+		*GetName(), WorldFootprint.X, WorldFootprint.Y, MinCell.X, MinCell.Y, QuarterTurns);
 }
 
 void APuzzleBlock::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -327,6 +403,18 @@ bool APuzzleBlock::CanSlide(EGridDirection Dir, FText* OutReason) const
 	// 축이나 목적지를 따지기 전에 답이 정해진다.
 	if (!CanStartMoving(OutReason))
 	{
+		return false;
+	}
+
+	// 고정된 조각은 축을 따지기 전에 끝난다. 사유를 축 문구와 나누는 이유는 두 상황이
+	// 플레이어에게 다른 뜻이기 때문이다: 하나는 "다른 쪽으로 밀어라"이고 다른 하나는
+	// "이 물건은 밀리지 않는다"이다.
+	if (!bCanMove)
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("LTTSPuzzle", "BlockFixed", "This object is fixed in place.");
+		}
 		return false;
 	}
 
@@ -487,9 +575,32 @@ void APuzzleBlock::BeginRotation(const FVector& Pivot, int32 TurnSign, float Dur
 	AnimState = EAnimState::Rotating;
 }
 
+void APuzzleBlock::ResolveHomeRegion()
+{
+	bHomeRegionResolved = true;
+
+	const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+	if (!Subsystem)
+	{
+		return;
+	}
+
+	// 구간이 하나도 없는 레벨(러쉬아워·회전 장애물 프로토타입)은 지금까지처럼 제한 없이
+	// 동작해야 하므로, 못 찾은 것은 오류가 아니라 안내다.
+	HomeRegion = Subsystem->FindRegionContaining(GetRect());
+
+	UE_LOG(LogLTTSGrid, Display, TEXT("%s: region %s."), *GetName(),
+		HomeRegion.IsValid() ? *HomeRegion->GetDisplayName() : TEXT("none (movement unrestricted)"));
+}
+
 void APuzzleBlock::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	if (!bHomeRegionResolved)
+	{
+		ResolveHomeRegion();
+	}
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
@@ -558,8 +669,15 @@ void APuzzleBlock::Tick(float DeltaSeconds)
 
 void APuzzleBlock::PostEditMove(bool bFinished)
 {
-	Super::PostEditMove(bFinished);
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
 
+	Super::PostEditMove(bFinished);
 	if (!bFinished)
 	{
 		return;		// 드래그 중이다. 매 프레임 스냅하면 기즈모와 충돌한다
@@ -594,6 +712,14 @@ void APuzzleBlock::PostEditMove(bool bFinished)
 void APuzzleBlock::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
 
 	RefreshVisual();
 	PostEditMove(true);

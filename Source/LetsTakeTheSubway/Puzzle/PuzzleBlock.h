@@ -13,6 +13,8 @@ class AGridActor;
 class APuzzleRegion;
 class UChildActorComponent;
 class UPuzzleSubsystem;
+class UMaterialInterface;
+class UStaticMesh;
 class UStaticMeshComponent;
 
 /**
@@ -70,6 +72,49 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
 	EPuzzleMoveAxis MoveAxis = EPuzzleMoveAxis::Both;
 
+	/**
+	 * 이 조각을 밀 수 있는지. 끄면 어느 방향으로도 움직이지 않는다.
+	 *
+	 * MoveAxis와 나누어 두는 이유는 두 값이 다른 질문에 답하기 때문이다. MoveAxis는 "어느
+	 * 축으로 움직이는가"라는 퍼즐 설계이고, 이 값은 "애초에 움직이는 물건인가"라는 배치
+	 * 결정이다. 같은 벤치 블루프린트를 놓고 인스턴스마다 이 체크만 끄면 붙박이 벤치가 된다.
+	 *
+	 * **끈 조각도 셀은 그대로 점유한다.** 고정 벤치는 폰과 다른 조각의 길을 막는 지형이다.
+	 * 영구 지형이라 아예 클릭도 되지 않아야 한다면 블록이 아니라 Blocked 마커를 쓴다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
+	bool bCanMove = true;
+
+	/**
+	 * 이 조각이 회전할 수 있는지. 회전판 위에서도, 회전 기둥에 붙어서도 돌지 않는다.
+	 *
+	 * 회전 장애물과 기둥에게는 "레버를 돌려도 이 구조물은 돌지 않는다"는 뜻이고, 일반
+	 * 블록에게는 "회전판이 나를 돌릴 수 없다"는 뜻이다. 후자의 경우 회전 자체가 거부된다 --
+	 * 돌지 않는 조각만 남겨 두고 나머지를 돌리면 조각들이 서로 겹친다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
+	bool bCanRotate = true;
+
+	/**
+	 * 풋프린트 안에서 **점유하지 않고 비워 둘** 사각 영역의 낮은 쪽 모서리.
+	 * 블록 자신의 프레임 기준이며, 블록이 돌면 함께 돈다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 0))
+	FIntPoint HollowOffset = FIntPoint::ZeroValue;
+
+	/**
+	 * 비워 둘 영역의 크기(셀). 어느 한 변이라도 0이면 꽉 찬 사각형이다(기본값).
+	 *
+	 * L자 벤치처럼 사각형에서 한 귀퉁이가 빠진 조각을 위한 것이다. 빠진 자리에는 다른
+	 * 조각이나 폰이 들어설 수 있다 -- 회전 기둥을 감싸고 도는 벤치가 바로 이 모양이다.
+	 *
+	 * **프록시 큐브는 여전히 풋프린트 전체를 덮는다.** 커서 판정이 그만큼 넉넉해지는데,
+	 * 빈 자리에 들어앉는 조각이 대개 더 높아서 실루엣 싸움에서 이긴다. 정확한 클릭 판정이
+	 * 필요해지면 몸체를 슬랩 여러 장으로 나누는 편이 낫다(회전 장애물이 그렇게 한다).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 0))
+	FIntPoint HollowSize = FIntPoint::ZeroValue;
+
 	/** 비주얼 높이(cm). 퍼즐에는 영향이 없다 -- 그리드는 2차원이다. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block", meta = (ClampMin = 10.0))
 	float Height = 150.0f;
@@ -103,6 +148,45 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Art")
 	TSubclassOf<AActor> VisualActorClass;
+
+	/**
+	 * 그레이박스 큐브 대신 보여 줄 스태틱 메시. 비워 두면 큐브를 그린다.
+	 *
+	 * VisualActorClass와 같은 일을 더 싸게 한다. 아트가 이미 블루프린트로 만들어 둔 물건
+	 * (엘리베이터처럼 자기 문과 이벤트 그래프를 가진 것)은 자식 액터로 품어야 하지만,
+	 * 벤치나 자판기처럼 **메시 하나뿐인 장식**을 위해 액터 블루프린트를 따로 만들 이유는
+	 * 없다. 이 슬롯을 채우면 코드가 만든 컴포넌트에 그 메시가 들어간다.
+	 *
+	 * 둘 다 채우면 둘 다 그려진다. 보통은 하나만 쓴다.
+	 *
+	 * 규칙은 자식 액터 쪽과 똑같다: **아트는 보여 주기만 한다.** 콜리전은 꺼지고 그리드
+	 * 생성도 이 컴포넌트를 지나친다. 커서가 잡는 것과 그리드가 보는 것은 언제나 풋프린트와
+	 * 정확히 같은 프록시 큐브다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Art")
+	TObjectPtr<UStaticMesh> ArtMesh;
+
+	/**
+	 * 아트 메시를 블록 원점(풋프린트 중심의 바닥)에 맞추는 보정.
+	 *
+	 * 아트 메시의 피벗이 바닥 중앙이 아니거나 축이 다른 쪽을 보고 있을 때 쓴다. 아트 에셋을
+	 * 고치지 않고 게임플레이 쪽에서 맞추기 위한 자리다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Art")
+	FTransform ArtMeshOffset = FTransform::Identity;
+
+	/**
+	 * 아트 메시의 슬롯이 비어 있을 때(엔진 기본 회색 격자) 대신 씌울 머티리얼.
+	 *
+	 * 임포트된 메시는 슬롯이 비면 WorldGridMaterial로 그려진다. 원본 스태틱 메시 액터는
+	 * 컴포넌트 오버라이드로 프로젝트 툰 머티리얼을 덮어 쓰고 있었는데, 메시만 이 컴포넌트로
+	 * 옮기면 그 오버라이드는 따라오지 않는다. 이미 칠해진 슬롯은 건드리지 않는다.
+	 *
+	 * C++ 기본값은 비어 있다. 어느 머티리얼을 쓸지는 아트의 결정이므로 블루프린트
+	 * 기본값에서 지정한다(README: Core에서 Art로 하드 참조하지 않는다).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Art")
+	TObjectPtr<UMaterialInterface> ArtFallbackMaterial;
 
 	// --- CUTAWAY DISABLED 2026-09-04 -------------------------------------------------
 	// 폰을 가리는 블록을 납작하게 만드는 기능은 당분간 꺼 둔다. 다시 켤 수 있도록 코드는
@@ -140,6 +224,12 @@ public:
 	 * 한다.
 	 */
 	virtual void GatherOccupiedCells(TArray<FIntPoint>& OutCells) const;
+
+	/** 비워 둘 영역이 지정돼 있으면 true. */
+	bool HasHollow() const { return HollowSize.X > 0 && HollowSize.Y > 0; }
+
+	/** 지금 그리드에 놓인 상태의 빈 영역. 비워 둔 것이 없으면 크기 0 사각형이다. */
+	FGridRect GetWorldHollowRect() const;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
@@ -247,8 +337,8 @@ protected:
 	/** 몸체의 크기와 색을 다시 맞춘다. 풋프린트나 높이가 바뀔 때마다 호출된다. */
 	virtual void RefreshVisual();
 
-	/** 아트 액터가 붙어 있으면 true. 파생 클래스가 자기 그레이박스 장식을 숨길 때 쓴다. */
-	bool IsUsingArtVisual() const { return VisualActorClass != nullptr; }
+	/** 아트(자식 액터든 스태틱 메시든)가 붙어 있으면 true. 파생 클래스가 자기 그레이박스 장식을 숨길 때 쓴다. */
+	bool IsUsingArtVisual() const { return VisualActorClass != nullptr || ArtMesh != nullptr; }
 
 	/**
 	 * 자식 아트 액터를 순수한 장식으로 만든다.
@@ -258,6 +348,22 @@ protected:
 	 * 구워 조각이 놓인 자리를 지형으로 굳혀 버린다.
 	 */
 	void SanitiseVisualActor();
+
+	/**
+	 * 자기를 담고 있는 퍼즐 구간을 찾아 기억한다. 첫 틱에 한 번만 돈다.
+	 *
+	 * BeginPlay가 아니라 첫 틱인 이유는 등록 순서 때문이다. 구간도 액터라 자기
+	 * BeginPlay에서 등록하는데, 액터의 BeginPlay 순서는 정해져 있지 않다. 블록이 먼저
+	 * 돌면 아직 아무 구간도 등록돼 있지 않아 "구간 없음"으로 굳어 버린다. 첫 틱은 모든
+	 * BeginPlay가 끝난 뒤이므로 배치 순서에 좌우되지 않는다.
+	 */
+	void ResolveHomeRegion();
+
+	/**
+	 * 저작된 풋프린트 안의 셀이, 지금까지 돈 90도 회전 횟수를 반영해 그리드 위에 놓인
+	 * 풋프린트 안에서 어디에 해당하는지 구한다.
+	 */
+	FIntPoint LocalToWorldOffset(FIntPoint Local) const;
 
 	/**
 	 * 서브시스템의 등록부에 들어간다. 조각이 다른 목록에 들어갈 수 있도록 오버라이드한다:
@@ -294,6 +400,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Puzzle Block|Art")
 	TObjectPtr<UChildActorComponent> VisualActor;
 
+	/** ArtMesh를 담는 자리. 메시가 비어 있으면 보이지 않는다. 콜리전은 언제나 꺼져 있다. */
+	UPROPERTY(VisibleAnywhere, Category = "Puzzle Block|Art")
+	TObjectPtr<UStaticMeshComponent> ArtMeshComponent;
+
 	/** 점유한 사각 영역의 최소 모서리, 그리드 셀 단위. */
 	FIntPoint MinCell = FIntPoint::ZeroValue;
 
@@ -302,8 +412,11 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<AGridActor> Grid;
 
-	/** BeginPlay에서 자기 사각형을 담는 구간을 찾아 기억한다. */
+	/** 첫 틱에 자기 사각형을 담는 구간을 찾아 기억한다. */
 	TWeakObjectPtr<APuzzleRegion> HomeRegion;
+
+	/** 구간 탐색을 첫 틱에 한 번만 하기 위한 표시. */
+	bool bHomeRegionResolved = false;
 
 private:
 	/** 회전 타일이 반응할 수 있도록 블록이 정지했음을 서브시스템에 알린다. */

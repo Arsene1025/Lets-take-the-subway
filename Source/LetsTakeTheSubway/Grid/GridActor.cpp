@@ -13,6 +13,7 @@
 #include "CollisionShape.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Engine/NavigationObjectBase.h"
 #include "GameFramework/Pawn.h"
 
 namespace
@@ -329,6 +330,67 @@ bool AGridActor::FindPath(FIntPoint Start, FIntPoint Goal, const APawn* Pawn, TA
 	return FGridPathfinder::FindPath(*this, Start, Goal, Pawn, OutPath);
 }
 
+bool AGridActor::FindNearestReachableCell(FIntPoint From, const TArray<FIntPoint>& Candidates,
+	const APawn* Pawn, FIntPoint& OutCell, int32* OutSteps) const
+{
+	// 이미 후보 위에 서 있으면 걸을 필요가 없다. 먼저 보는 이유는 그 답이 언제나 최선이고,
+	// A*를 한 번도 돌리지 않아도 되기 때문이다.
+	if (Candidates.Contains(From))
+	{
+		OutCell = From;
+		if (OutSteps)
+		{
+			*OutSteps = 0;
+		}
+		return true;
+	}
+
+	// 맨해튼 거리가 가까운 후보부터 본다. 4연결 격자에서 경로 길이는 절대 맨해튼 거리보다
+	// 짧을 수 없으므로, 지금까지 찾은 최단 걸음보다 맨해튼 거리가 먼 후보는 볼 필요조차 없다.
+	// 덕분에 문이 여덟 짝인 열차에서도 A*를 한두 번만 돌리고 끝난다.
+	TArray<FIntPoint> Sorted = Candidates;
+	Sorted.Sort([From](const FIntPoint& A, const FIntPoint& B)
+	{
+		return (FMath::Abs(A.X - From.X) + FMath::Abs(A.Y - From.Y))
+			< (FMath::Abs(B.X - From.X) + FMath::Abs(B.Y - From.Y));
+	});
+
+	bool bFound = false;
+	int32 BestSteps = MAX_int32;
+
+	TArray<FIntPoint> Path;
+	for (const FIntPoint& Candidate : Sorted)
+	{
+		const int32 Manhattan = FMath::Abs(Candidate.X - From.X) + FMath::Abs(Candidate.Y - From.Y);
+		if (bFound && Manhattan >= BestSteps)
+		{
+			break;
+		}
+
+		if (!CanPawnEnter(Candidate, Pawn))
+		{
+			continue;
+		}
+
+		Path.Reset();
+		if (!FindPath(From, Candidate, Pawn, Path) || Path.Num() >= BestSteps)
+		{
+			continue;
+		}
+
+		BestSteps = Path.Num();
+		OutCell = Candidate;
+		bFound = true;
+	}
+
+	if (bFound && OutSteps)
+	{
+		*OutSteps = BestSteps;
+	}
+
+	return bFound;
+}
+
 void AGridActor::NotifyPawnEnteredCell(APawn* Pawn, FIntPoint Cell)
 {
 	const FGridCellData* Data = GetCell(Cell);
@@ -400,7 +462,10 @@ void AGridActor::GenerateFromTraces()
 		const AActor* Parent = Actor->GetParentActor();
 		const bool bParentIgnored = Parent && Parent->ActorHasTag(LTTSGrid::GenerationIgnoreTag());
 
-		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()) || bParentIgnored)
+		// PlayerStart 같은 배치용 표식(NavigationObjectBase)은 캡슐 콜리전을 갖고 있어 그 자리의
+		// 바닥으로 구워진다. 캡슐이 트레이스 시작점에 걸리면 셀이 트레이스 꼭대기 높이에 떠 버린다.
+		if (Actor->IsEditorOnly() || Actor->IsA<APawn>() || Actor->IsA<ANavigationObjectBase>()
+			|| Actor->ActorHasTag(LTTSGrid::GenerationIgnoreTag()) || bParentIgnored)
 		{
 			Params.AddIgnoredActor(Actor);
 		}
@@ -792,6 +857,14 @@ void AGridActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEv
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
+
 	static const TSet<FName> GenerationProperties = {
 		GET_MEMBER_NAME_CHECKED(AGridActor, SizeInCells),
 		GET_MEMBER_NAME_CHECKED(AGridActor, RegionHeight),
@@ -829,8 +902,15 @@ void AGridActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEv
 
 void AGridActor::PostEditMove(bool bFinished)
 {
-	Super::PostEditMove(bFinished);
+	// 클래스 기본값(CDO)과 블루프린트 템플릿에는 월드도, 배치된 트랜스폼도 없다.
+	// 블루프린트 에디터의 Class Defaults를 편집하는 것도 이 경로를 지나므로, 여기서
+	// 막지 않으면 그리드를 찾아 스냅하려다 에디터가 죽는다.
+	if (IsTemplate())
+	{
+		return;
+	}
 
+	Super::PostEditMove(bFinished);
 	// 원점이 움직였으니 모든 셀의 월드 위치가 바뀌었다. 드래그가 끝난 뒤에만 다시 생성한다
 	// -- 마우스 이동 프레임마다 트레이스 6400번은 쓸 수 없는 수준이다.
 	if (bFinished && bAutoRegenerateOnEdit)
@@ -917,6 +997,12 @@ void AGridActor::BakeOverridesFromMarkers()
 			if (Marker->Rule)
 			{
 				RuleIndex = ConditionalRules.Add(DuplicateObject<UGridCellRule>(Marker->Rule, this));
+			}
+			else if (Marker->RuleClass)
+			{
+				// 인스턴스가 없으면 클래스 기본값으로 하나 만든다. 배치 자동화가 Instanced
+				// 서브오브젝트를 만들 수 없어서 열어 둔 길이다.
+				RuleIndex = ConditionalRules.Add(NewObject<UGridCellRule>(this, Marker->RuleClass));
 			}
 			else
 			{
