@@ -164,10 +164,17 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 			return Pick;
 		}
 
-		// 열차는 문이 열려 있고 폰이 그 문 앞에 서 있을 때만 잡는다. 그 밖의 경우에는
-		// 없는 셈 치고 뒤쪽 바닥을 클릭하게 둔다 -- 차체가 승강장 셀을 통째로 가리기 때문이다.
+		// 열차는 어느 면을 눌러도, 언제 눌러도 잡는다. 누르면 폰이 가장 가까운 문 앞까지
+		// 걸어가 기다리므로 "지금 탈 수 있는가"는 더 이상 커서가 답할 질문이 아니다.
+		//
+		// --- TRAIN PICK GATED BY CanBoard DISABLED 2026-09-11 ---
+		// 예전에는 폰이 문 앞 셀에 서 있을 때만 열차를 잡았다. 차체가 승강장 셀을 통째로
+		// 가리기 때문인데, 그 대가로 문 앞이 아닌 곳에서 누르면 클릭이 뒤쪽 바닥으로 흘러가
+		// 폰이 말없이 걸어가 버렸다. 차체 뒤 승강장 셀을 클릭할 수 없게 되는 쪽을 택했다
+		// (사용자 결정, 2026-09-11). 되살리려면 아래 #if 0을 1로 바꾼다.
 		if (AGridTrain* Train = Cast<AGridTrain>(Hit.GetActor()))
 		{
+#if 0
 			FText Refusal;
 			if (!Train->CanBoard(GetGridPawn(), &Refusal))
 			{
@@ -175,6 +182,7 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 				Pick.VehicleRefusal = Refusal;
 			}
 			else
+#endif
 			{
 				Pick.Kind = FCursorPick::EKind::Vehicle;
 				Pick.Vehicle = Train;
@@ -302,6 +310,11 @@ void AGridPlayerController::OnPressed()
 
 	const FCursorPick Pick = PickUnderCursor();
 
+	// 누름은 언제나 새로운 뜻이다. 걸어가던 탑승 예약은 여기서 버린다 -- 남겨 두면 플레이어가
+	// 다른 곳을 눌러 폰을 돌려세운 뒤에도 예약이 살아남아 엉뚱한 순간에 태운다. 같은 탈것을
+	// 다시 눌렀다면 아래에서 새로 예약하며 경로를 다시 잡는다.
+	CancelPendingBoarding();
+
 	if (Pick.Kind == FCursorPick::EKind::Lever)
 	{
 		APuzzleLever* Lever = Pick.Lever.Get();
@@ -352,15 +365,12 @@ void AGridPlayerController::OnPressed()
 			return;
 		}
 
-		FText Reason;
-		if (Train->TryBoard(GridPawn, &Reason))
-		{
-			ShowFeedback(TEXT("You board the train."), FLinearColor(0.45f, 0.85f, 1.0f));
-		}
-		else
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-		}
+		// 정차역을 가리지 않고 문 앞 셀을 모은다. 클릭한 순간 열차가 터널 한가운데 있을 수도
+		// 있으므로, 폰은 "지금 서 있는 역"이 아니라 승강장 전체에서 가장 가까운 문으로 간다.
+		TArray<FIntPoint> DoorCells;
+		Train->GetApproachCells(DoorCells);
+
+		BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, DoorCells);
 		return;
 	}
 
@@ -409,6 +419,9 @@ void AGridPlayerController::OnPressed()
 	{
 		// 커서 아래에 열차가 있었는데 탈 수 없었다면 그 이유부터 알려 준다. 걷는 동작은
 		// 그대로다 -- 승강장 셀을 클릭하려던 것일 수도 있기 때문이다.
+		//
+		// 지금은 열차를 언제나 잡으므로 이 사유가 채워지는 일이 없다. PickUnderCursor의
+		// TRAIN PICK GATED BY CanBoard 블록을 되살리면 다시 살아난다(2026-09-11).
 		if (!Pick.VehicleRefusal.IsEmpty())
 		{
 			ShowFeedback(Pick.VehicleRefusal.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
@@ -444,6 +457,192 @@ void AGridPlayerController::MovePawnToCell(const FIntPoint& Cell)
 	}
 
 	GridPawn->RequestMoveToCell(Cell);
+}
+
+// ---------------------------------------------------------------------------- 예약 탑승
+
+bool AGridPlayerController::BeginPendingBoarding(
+	FPendingBoarding::EKind Kind, AActor* Target, const TArray<FIntPoint>& DoorCells)
+{
+	AGridActor* Grid = GetGrid();
+	AGridPawn* GridPawn = GetGridPawn();
+
+	if (!Grid || !GridPawn || !Target || Kind == FPendingBoarding::EKind::None)
+	{
+		return false;
+	}
+
+	if (DoorCells.IsEmpty())
+	{
+		ShowFeedback(TEXT("There is no door to walk to from this floor."), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	// 직선 거리가 아니라 경로 길이로 고른다. 벽 하나를 사이에 둔 코앞의 문을 고르면 폰이
+	// 역을 한 바퀴 돌아 그리로 간다.
+	FIntPoint DoorCell;
+	if (!Grid->FindNearestReachableCell(GridPawn->GetCurrentCell(), DoorCells, GridPawn, DoorCell))
+	{
+		ShowFeedback(TEXT("There is no way to reach a door from here."), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	Pending = FPendingBoarding();
+	Pending.Kind = Kind;
+	Pending.Target = Target;
+	Pending.DoorCell = DoorCell;
+
+	// 이미 문 앞에 서 있으면 걸을 것이 없다. 한 프레임도 기다리지 않고 그 자리에서 태운다.
+	if (GridPawn->GetCurrentCell() == DoorCell && !GridPawn->IsMoving())
+	{
+		TryCompleteBoarding();
+		return true;
+	}
+
+	GridPawn->RequestMoveToCell(DoorCell);
+
+	// 길찾기가 남긴 "Moving to (x,y)"를 덮는다. 지금 중요한 것은 몇 걸음인지가 아니라
+	// 폰이 왜 걸어가는지다.
+	ShowFeedback(
+		FString::Printf(TEXT("Walking to the door at (%d,%d)."), DoorCell.X, DoorCell.Y),
+		FLinearColor(0.45f, 0.85f, 1.0f));
+
+	return true;
+}
+
+void AGridPlayerController::CancelPendingBoarding(const FString& Reason)
+{
+	if (Pending.Kind == FPendingBoarding::EKind::None)
+	{
+		return;
+	}
+
+	Pending = FPendingBoarding();
+
+	if (!Reason.IsEmpty())
+	{
+		ShowFeedback(Reason, FLinearColor(1.0f, 0.65f, 0.05f));
+	}
+}
+
+void AGridPlayerController::UpdatePendingBoarding()
+{
+	AGridPawn* GridPawn = GetGridPawn();
+	AActor* Target = Pending.Target.Get();
+
+	if (!GridPawn || !Target)
+	{
+		CancelPendingBoarding();
+		return;
+	}
+
+	// 폰이 그리드를 떠났다. 우리가 태운 것이라면 성공한 순간에 예약이 이미 지워졌으므로,
+	// 여기까지 왔다는 것은 다른 무언가가 폰을 데려갔다는 뜻이다.
+	if (!GridPawn->IsOnGrid())
+	{
+		CancelPendingBoarding();
+		return;
+	}
+
+	if (GridPawn->IsMoving())
+	{
+		return;
+	}
+
+	// 서 있는데 문 앞이 아니다: 도중에 길이 막혀 폰이 멈춰 섰다는 뜻이다.
+	if (GridPawn->GetCurrentCell() != Pending.DoorCell)
+	{
+		CancelPendingBoarding(TEXT("Could not reach the door."));
+		return;
+	}
+
+	TryCompleteBoarding();
+}
+
+bool AGridPlayerController::TryCompleteBoarding()
+{
+	AGridPawn* GridPawn = GetGridPawn();
+	if (!GridPawn)
+	{
+		CancelPendingBoarding();
+		return false;
+	}
+
+	if (Pending.Kind == FPendingBoarding::EKind::Elevator)
+	{
+		APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Pending.Target.Get());
+		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+		APuzzleElevatorDock* Dock = (Elevator && Subsystem) ? Subsystem->FindDockUnder(*Elevator) : nullptr;
+
+		if (!Elevator || !Dock)
+		{
+			CancelPendingBoarding(TEXT("The elevator is no longer on its dock."));
+			return false;
+		}
+
+		// 걸어오는 사이에 다른 조각이 아직 정리되는 중일 수 있다. 그동안은 기다린다.
+		if (Elevator->IsAnimating() || Dock->IsBusy())
+		{
+			return false;
+		}
+
+		// 차체에게 먼저 태워 달라고 한다. 문 앞에 섰다는 마지막 확인이자, 블루프린트가
+		// 연출을 매다는 OnBoarded 이벤트가 나가는 자리다.
+		FText Reason;
+		if (!Elevator->TryBoard(GridPawn, &Reason))
+		{
+			CancelPendingBoarding(Reason.ToString());
+			return false;
+		}
+
+		if (!Dock->TryLaunch(GridPawn, &Reason))
+		{
+			CancelPendingBoarding(Reason.ToString());
+			return false;
+		}
+
+		Pending = FPendingBoarding();
+		ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
+		return true;
+	}
+
+	if (Pending.Kind == FPendingBoarding::EKind::Train)
+	{
+		AGridTrain* Train = Cast<AGridTrain>(Pending.Target.Get());
+		if (!Train)
+		{
+			CancelPendingBoarding();
+			return false;
+		}
+
+		FText Reason;
+		if (!Train->CanBoard(GridPawn, &Reason))
+		{
+			// 열차는 기다리면 온다. 문이 닫혀 있든 아직 터널에 있든 예약은 살려 두고, 왜
+			// 아직 못 타는지는 한 번만 알린다 -- 매 프레임 같은 줄을 다시 쓰면 그사이에
+			// 일어난 다른 안내를 전부 덮어 버린다.
+			if (!Pending.bWaitReported)
+			{
+				Pending.bWaitReported = true;
+				ShowFeedback(
+					FString::Printf(TEXT("Waiting at the door. %s"), *Reason.ToString()),
+					FLinearColor::White);
+			}
+			return false;
+		}
+
+		if (!Train->TryBoard(GridPawn, &Reason))
+		{
+			CancelPendingBoarding(Reason.ToString());
+			return false;
+		}
+
+		Pending = FPendingBoarding();
+		ShowFeedback(TEXT("You board the train."), FLinearColor(0.45f, 0.85f, 1.0f));
+		return true;
+	}
+
+	return false;
 }
 
 void AGridPlayerController::OnReleased()
@@ -534,15 +733,8 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 	// 것을 뒤쪽 바닥으로 걸어가라는 뜻으로 읽을 수는 없다.
 	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
 	{
-		FText Reason;
-		if (!Elevator->TryBoard(GetGridPawn(), &Reason))
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		// 탑승은 문 앞에 섰다는 확인일 뿐이다. 실제로 층을 옮기는 것은 차체 아래의 구조물이며,
-		// 구조물 위가 아니면 차체는 그냥 밀 수 있는 상자다.
+		// 층을 옮기는 것은 차체가 아니라 그 아래의 구조물이다. 구조물 위가 아니면 차체는
+		// 그냥 밀 수 있는 상자이며, 그 사실을 누른 자리에서 바로 알려 준다.
 		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
 		APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
 
@@ -552,14 +744,21 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 			return;
 		}
 
-		if (Dock->TryLaunch(GetGridPawn(), &Reason))
-		{
-			ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
-		}
-		else
+		// 탈 수 없는 엘리베이터라면 폰을 문 앞까지 걸어 보내 놓고 거기서 거절하는 것보다,
+		// 누른 자리에서 곧바로 이유를 알려 주는 편이 낫다.
+		FText Reason;
+		if (!Dock->CanLaunch(&Reason))
 		{
 			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+			return;
 		}
+
+		// 이 층에서 실제로 탈 수 있는 문 앞 셀만 후보로 삼는다. 샤프트에 걸린 차체는 한쪽
+		// 문이 선로나 다른 층을 향하고 있어, 그쪽으로 폰을 보내면 영영 닿지 못한다.
+		TArray<FIntPoint> DoorCells;
+		Elevator->GetBoardableDoorCells(DoorCells);
+
+		BeginPendingBoarding(FPendingBoarding::EKind::Elevator, Elevator, DoorCells);
 		return;
 	}
 
@@ -848,6 +1047,14 @@ void AGridPlayerController::FinishDrag()
 
 FString AGridPlayerController::GetDragStatusText() const
 {
+	if (HasPendingBoarding())
+	{
+		return FString::Printf(TEXT("Boarding %s via cell (%d,%d)%s"),
+			*GetNameSafe(Pending.Target.Get()),
+			Pending.DoorCell.X, Pending.DoorCell.Y,
+			Pending.bWaitReported ? TEXT(", waiting") : TEXT(""));
+	}
+
 	if (const APuzzleLever* Lever = DraggedLever.Get())
 	{
 		return FString::Printf(TEXT("Turning %s (%.0f deg%s)"),
@@ -896,6 +1103,11 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 	if (DraggedBlock.IsValid())
 	{
 		UpdateDrag();
+	}
+
+	if (HasPendingBoarding())
+	{
+		UpdatePendingBoarding();
 	}
 
 	UpdateHover();
@@ -950,6 +1162,17 @@ void AGridPlayerController::UpdateHover()
 			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
 		}
 	}
+	else if (Pick.Kind == FCursorPick::EKind::Vehicle)
+	{
+		if (const AGridTrain* Train = Pick.Vehicle.Get())
+		{
+			// 차체가 아니라 탈 수 있는 자리를 그린다. 레버와 같은 생각이다: 누르기 전에
+			// 플레이어가 알아야 하는 것은 폰이 어디로 걸어갈 것인가다.
+			TArray<FIntPoint> Cells;
+			Train->GetApproachCells(Cells);
+			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
+		}
+	}
 	else if (Pick.Kind == FCursorPick::EKind::Block)
 	{
 		if (const APuzzleBlock* Block = Pick.Block.Get())
@@ -958,6 +1181,16 @@ void AGridPlayerController::UpdateHover()
 			// 잡으려는 건지 볼 수 있게 한다.
 			TArray<FIntPoint> Cells;
 			Block->GatherOccupiedCells(Cells);
+
+			// 엘리베이터는 밀 수도 있고 탈 수도 있다. 탈 수 있는 문 앞 셀까지 함께 그려서
+			// 클릭이 폰을 어디로 보낼지 보이게 한다.
+			if (const APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
+			{
+				TArray<FIntPoint> DoorCells;
+				Elevator->GetBoardableDoorCells(DoorCells);
+				Cells.Append(DoorCells);
+			}
+
 			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
 		}
 	}

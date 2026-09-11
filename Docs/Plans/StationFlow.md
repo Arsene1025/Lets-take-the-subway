@@ -1,4 +1,4 @@
-# 역 전체 흐름 — 퍼즐 구간 · 엘리베이터 승강 · 열차 · 행인 승하차 · FlowTest_1 맵
+﻿# 역 전체 흐름 — 퍼즐 구간 · 엘리베이터 승강 · 열차 · 행인 승하차 · FlowTest_1 맵
 
 작성일 2026-09-08. 출처: `지하철을타자 설명자료-260908.pdf`(기획, 5쪽) + 사용자 추가 요청 3건(채팅).
 대상 레벨: 신규 테스트 맵 `Content/Maps/FlowTest_1`(5절). 검증 뒤 `GreyBoxTest_1`에 적용.
@@ -140,6 +140,10 @@ C를 기본으로 하고, `TargetFloorCell`이 비어 있으면 A의 `TravelHeig
 서브시스템의 `Tiles`는 `TArray<TWeakObjectPtr<APuzzleFloorTile>>`로 바뀐다.
 
 ### 3.3 `Puzzle/PuzzleElevatorDock.h/.cpp` — `APuzzleElevatorDock : APuzzleFloorTile` (엘리베이터 구조물)
+
+> **2026-09-11: 저작 방식이 바뀌었다.** 목표 층은 이제 셀 번호가 아니라 **층마다 하나씩 놓고 서로를
+> 가리키는 Dock**(`TargetDock`)에서 나온다. 아래 `TargetFloorCell`·`TravelHeight` 설명은 `TargetDock`이
+> 비어 있을 때의 예비 경로로만 유효하다. 새 설계는 `BoardingRefactor.md` 2.3절을 본다.
 
 - 저작: `TargetFloorCell`(FIntPoint, 1.2절 C), `TravelHeight = 800`(셀 미지정 시), `ExitDirection`
   (EGridDirection, 도착 층에서 내릴 문), `TravelSpeed = 200 cm/s`, `DoorDwellSeconds = 0.5`

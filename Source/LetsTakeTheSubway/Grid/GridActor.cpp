@@ -330,6 +330,67 @@ bool AGridActor::FindPath(FIntPoint Start, FIntPoint Goal, const APawn* Pawn, TA
 	return FGridPathfinder::FindPath(*this, Start, Goal, Pawn, OutPath);
 }
 
+bool AGridActor::FindNearestReachableCell(FIntPoint From, const TArray<FIntPoint>& Candidates,
+	const APawn* Pawn, FIntPoint& OutCell, int32* OutSteps) const
+{
+	// 이미 후보 위에 서 있으면 걸을 필요가 없다. 먼저 보는 이유는 그 답이 언제나 최선이고,
+	// A*를 한 번도 돌리지 않아도 되기 때문이다.
+	if (Candidates.Contains(From))
+	{
+		OutCell = From;
+		if (OutSteps)
+		{
+			*OutSteps = 0;
+		}
+		return true;
+	}
+
+	// 맨해튼 거리가 가까운 후보부터 본다. 4연결 격자에서 경로 길이는 절대 맨해튼 거리보다
+	// 짧을 수 없으므로, 지금까지 찾은 최단 걸음보다 맨해튼 거리가 먼 후보는 볼 필요조차 없다.
+	// 덕분에 문이 여덟 짝인 열차에서도 A*를 한두 번만 돌리고 끝난다.
+	TArray<FIntPoint> Sorted = Candidates;
+	Sorted.Sort([From](const FIntPoint& A, const FIntPoint& B)
+	{
+		return (FMath::Abs(A.X - From.X) + FMath::Abs(A.Y - From.Y))
+			< (FMath::Abs(B.X - From.X) + FMath::Abs(B.Y - From.Y));
+	});
+
+	bool bFound = false;
+	int32 BestSteps = MAX_int32;
+
+	TArray<FIntPoint> Path;
+	for (const FIntPoint& Candidate : Sorted)
+	{
+		const int32 Manhattan = FMath::Abs(Candidate.X - From.X) + FMath::Abs(Candidate.Y - From.Y);
+		if (bFound && Manhattan >= BestSteps)
+		{
+			break;
+		}
+
+		if (!CanPawnEnter(Candidate, Pawn))
+		{
+			continue;
+		}
+
+		Path.Reset();
+		if (!FindPath(From, Candidate, Pawn, Path) || Path.Num() >= BestSteps)
+		{
+			continue;
+		}
+
+		BestSteps = Path.Num();
+		OutCell = Candidate;
+		bFound = true;
+	}
+
+	if (bFound && OutSteps)
+	{
+		*OutSteps = BestSteps;
+	}
+
+	return bFound;
+}
+
 void AGridActor::NotifyPawnEnteredCell(APawn* Pawn, FIntPoint Cell)
 {
 	const FGridCellData* Data = GetCell(Cell);

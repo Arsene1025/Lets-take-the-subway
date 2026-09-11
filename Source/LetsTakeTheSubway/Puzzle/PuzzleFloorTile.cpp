@@ -69,6 +69,14 @@ bool APuzzleFloorTile::Straddles(const APuzzleBlock& Block) const
 	return Region.Overlaps(BlockRect) && !Region.ContainsRect(BlockRect);
 }
 
+// ---------------------------------------------------------------------------- 층 높이
+
+double APuzzleFloorTile::ResolveFloorZ(const AGridActor& InGrid, FIntPoint MinCell, double /*PlacedZ*/) const
+{
+	// 셀 하나에 바닥은 하나다. 그러므로 셀의 바닥 높이가 곧 이 타일이 놓인 층이다.
+	return InGrid.CellToWorld(MinCell).Z;
+}
+
 // ---------------------------------------------------------------------------- 비주얼
 
 void APuzzleFloorTile::RefreshVisual()
@@ -131,11 +139,15 @@ void APuzzleFloorTile::BeginPlay()
 
 	// 변의 길이가 짝수이면 영역의 중심이 셀 모서리에 떨어진다. 회전한 모든 풋프린트를
 	// 재는 기준이 되는 회전축이 정확히 그 점이다.
+	//
+	// 높이는 파생 클래스가 정한다. 배치된 Z를 먼저 읽어 두는 이유는 그것이 셀에서 층을
+	// 알아낼 수 없을 때의 유일한 근거이기 때문이다(샤프트 위의 위층 구조물).
+	const double PlacedZ = GetActorLocation().Z;
 	const FVector Origin = Grid->GetGridOrigin();
 	PivotWorld = FVector(
 		Origin.X + (Region.Min.X + SizeInCells * 0.5) * Grid->CellSize,
 		Origin.Y + (Region.Min.Y + SizeInCells * 0.5) * Grid->CellSize,
-		Grid->CellToWorld(Region.Min).Z);
+		ResolveFloorZ(*Grid, Region.Min, PlacedZ));
 
 	SetActorLocation(PivotWorld);
 	RefreshVisual();
@@ -143,7 +155,8 @@ void APuzzleFloorTile::BeginPlay()
 	for (TActorIterator<APuzzleFloorTile> It(GetWorld()); It; ++It)
 	{
 		const APuzzleFloorTile* Other = *It;
-		if (Other && Other != this && !Other->bDisabled && Other->Region.Overlaps(Region))
+		if (Other && Other != this && !Other->bDisabled && Other->Region.Overlaps(Region)
+			&& !CanCoexistWith(*Other))
 		{
 			UE_LOG(LogLTTSGrid, Warning,
 				TEXT("%s: overlaps floor tile %s. Tiles must be disjoint."), *GetName(), *Other->GetName());
@@ -208,7 +221,8 @@ void APuzzleFloorTile::PostEditMove(bool bFinished)
 	Modify();
 	SetActorRotation(FRotator::ZeroRotator);
 	SetActorLocation(GridFootprint::CentreFromMinCell(
-		*FoundGrid, SnappedMin, Size, FoundGrid->CellToWorld(SnappedMin).Z));
+		*FoundGrid, SnappedMin, Size,
+		ResolveFloorZ(*FoundGrid, SnappedMin, GetActorLocation().Z)));
 }
 
 void APuzzleFloorTile::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)

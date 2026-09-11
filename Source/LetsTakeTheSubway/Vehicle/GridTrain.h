@@ -252,6 +252,16 @@ public:
 	 */
 	void GetBoardingCells(int32 StopIndex, TArray<FIntPoint>& OutCells) const;
 
+	/**
+	 * 정차역을 가리지 않고, 이 열차의 문 앞이 되는 승강장 셀 전부.
+	 *
+	 * 플레이어가 멀리서 열차를 클릭하면 폰이 여기 중 가장 가까운 칸으로 걸어가 기다린다.
+	 * 정차역을 가리지 않는 이유는 클릭한 순간 열차가 터널 한가운데 있을 수도 있기 때문이다 --
+	 * 그때 "지금 서 있는 역"은 아직 아무 데도 아니다. 승강장이 없는 역(터널 정차)은 탑승
+	 * 셀이 비므로 저절로 빠진다.
+	 */
+	void GetApproachCells(TArray<FIntPoint>& OutCells) const;
+
 	/** 폰이 지금 이 열차에 탈 수 있으면 true. 아니면 이유를 알려준다. */
 	bool CanBoard(const AGridPawn* Pawn, FText* OutReason = nullptr) const;
 

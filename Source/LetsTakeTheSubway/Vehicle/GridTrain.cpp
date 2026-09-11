@@ -9,6 +9,7 @@
 #include "Grid/GridTypes.h"
 #include "NPC/GridNPCSpawner.h"
 #include "Player/GridPawn.h"
+#include "Vehicle/VehicleSeat.h"
 #include "Puzzle/PuzzleSubsystem.h"
 
 #include "Components/SceneComponent.h"
@@ -197,6 +198,21 @@ void AGridTrain::GetBoardingCells(int32 StopIndex, TArray<FIntPoint>& OutCells) 
 	}
 
 	ComputeBoardingCells(StopIndex, OutCells);
+}
+
+void AGridTrain::GetApproachCells(TArray<FIntPoint>& OutCells) const
+{
+	OutCells.Reset();
+
+	TArray<FIntPoint> Cells;
+	for (int32 Index = 0; Index < Stops.Num(); ++Index)
+	{
+		GetBoardingCells(Index, Cells);
+		for (const FIntPoint& Cell : Cells)
+		{
+			OutCells.AddUnique(Cell);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------- 가감속
@@ -549,9 +565,30 @@ void AGridTrain::EnterDoorsOpen()
 		{
 			ExitWorld = Grid->CellToWorld(Stop.ExitCell);
 		}
-		else if (Grid && !Stop.BoardingCells.IsEmpty() && Grid->IsValidCell(Stop.BoardingCells[0]))
+		else if (Grid)
 		{
-			ExitWorld = Grid->CellToWorld(Stop.BoardingCells[0]);
+			// 저작된 하차 셀이 없으면 이 역의 문 앞 셀 가운데 폰에게 가장 가까운 칸으로
+			// 내린다. 목록의 첫 칸을 쓰면 객차 어디에 앉아 있었든 언제나 같은 문으로 나오고,
+			// 그 문이 반대쪽 끝이면 폰이 차체를 가로질러 비스듬히 걸어 나온다.
+			TArray<FIntPoint> Boarding;
+			GetBoardingCells(CurrentStop, Boarding);
+
+			double BestDistanceSq = TNumericLimits<double>::Max();
+			for (const FIntPoint& Cell : Boarding)
+			{
+				if (!Grid->IsValidCell(Cell))
+				{
+					continue;
+				}
+
+				const FVector World = Grid->CellToWorld(Cell);
+				const double DistanceSq = FVector::DistSquaredXY(World, Pawn->GetActorLocation());
+				if (DistanceSq < BestDistanceSq)
+				{
+					BestDistanceSq = DistanceSq;
+					ExitWorld = World;
+				}
+			}
 		}
 
 		Pawn->WalkOntoGrid(ExitWorld);
@@ -729,10 +766,15 @@ bool AGridTrain::TryBoard(AGridPawn* Pawn, FText* OutReason)
 		return false;
 	}
 
-	// 좌석은 객차 바닥 위 차체 중심이다. 폰이 문 앞 셀에서 여기까지 직선으로 걸어 들어온다.
-	const FVector Seat(
-		GetActorLocation().X,
-		GetActorLocation().Y,
+	// 좌석은 차체 중심이 아니라 **폰을 마주 보는 자리**다. 진행축(로컬 X) 위의 자리는 폰의
+	// 것을 그대로 쓰고 폭 방향만 중심선으로 당기므로, 폰은 자기가 선 문으로 똑바로 걸어
+	// 들어간다. 중심으로 잡으면 45 m짜리 객차 끝에서 탄 폰이 차체를 따라 비스듬히 미끄러져
+	// 들어가 어느 문으로 탔는지도, 탄 것인지도 읽히지 않는다.
+	const FVector Seat = LTTSVehicle::SeatFacingRider(
+		Pawn->GetActorLocation(),
+		GetActorLocation(),
+		GetActorForwardVector(),
+		FMath::Max(BodyLength * 0.5 - 100.0, 0.0),
 		GetActorLocation().Z + Pawn->HeightAboveFloor);
 
 	Pawn->BoardVehicle(this, Seat);
