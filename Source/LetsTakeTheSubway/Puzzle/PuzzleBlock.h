@@ -126,13 +126,13 @@ public:
 	/**
 	 * 한 셀 이동 후 멈추고, 플레이어가 놓았다가 다시 잡을 때까지 기다린다.
 	 *
-	 * 기본값은 켜짐: 기획은 밀 수 있는 모든 조각에서 드래그 한 번이 한 걸음이기를 요구하므로,
-	 * 커서를 플랫폼 위로 쓸어 넘기는 게 아니라 셀 수 있는 이동 횟수로 퍼즐을 풀게 된다.
-	 * 끄면 예전의 연속 드래그로 돌아가는데, 드래그 코드의 모서리 꺾기 동작이 그것을 위해
-	 * 작성됐고 테스트에도 여전히 유용하다.
+	 * 기본값은 꺼짐(2026-09-11): 드래그는 방향을 가리키는 조이스틱처럼 동작해서, 커서를 잡은
+	 * 지점에서 반 칸 이상 밀어 둔 채로 있으면 막힐 때까지 **일정한 속도로 계속** 밀린다.
+	 * 켜면 예전의 "드래그 한 번에 한 칸"으로 돌아간다 -- 조각 하나하나를 셈해서 푸는 퍼즐을
+	 * 다시 만들고 싶을 때를 위해 남겨 둔다.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
-	bool bOneStepPerDrag = true;
+	bool bOneStepPerDrag = false;
 
 	/**
 	 * 그레이박스 큐브 대신 보여 줄 아트 액터. 비워 두면 지금까지처럼 큐브를 그린다.
@@ -250,6 +250,9 @@ public:
 
 	bool IsHeld() const { return bHeld; }
 
+	/** 지금 잡힌 채로 지나온 걸음 수. 디버그 오버레이가 읽는다. */
+	int32 GetStepsWhileHeld() const { return StepsWhileHeld; }
+
 	// ---------------------------------------------------------------- 컷어웨이
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
@@ -309,6 +312,16 @@ public:
 	 * 빙글 돌아 빠져나가 버린다.
 	 */
 	void SetHeld(bool bInHeld);
+
+	/**
+	 * 쥔 채로 계속 밀 방향. 비어 있으면 지금 향하던 셀에 도착한 뒤 멈춘다.
+	 *
+	 * 컨트롤러가 매 틱 갱신하고, **이어 붙이는 일은 블록이 자기 Tick에서** 한다. 도착한
+	 * 프레임에 컨트롤러가 다시 밀어 주기를 기다리면 칸마다 한 프레임씩 쉬게 되어, 요청된
+	 * "일정한 속도"가 칸 경계마다 끊긴다. 남은 이동 거리를 다음 칸으로 이월하는 것도
+	 * 그래서 블록 쪽에 있다.
+	 */
+	void SetHeldSlideDirection(TOptional<EGridDirection> Dir);
 
 	/**
 	 * 회전의 비주얼 쪽 절반을 시작한다. 호출자가 이미 결과를 결정했고 목적지 사각 영역을
@@ -438,6 +451,9 @@ private:
 
 	/** 블록을 잡은 뒤 이동한 걸음 수. 놓을 때 0이면 드래그가 아니라 클릭이었다는 뜻이다. */
 	int32 StepsWhileHeld = 0;
+
+	/** 쥔 채로 계속 밀 방향 (SetHeldSlideDirection). 비어 있으면 다음 칸에서 멈춘다. */
+	TOptional<EGridDirection> HeldSlideDir;
 
 	FVector SlideTarget = FVector::ZeroVector;
 

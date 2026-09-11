@@ -111,15 +111,41 @@ struct FPendingBoarding
 };
 
 /**
- * 셀을 클릭하면 그리로 이동하고, 퍼즐 블록을 누른 채 드래그하면 민다.
+ * 이동 키가 향하는 화면 기준 방향.
  *
- * 마우스 버튼 하나가 보조 키 없이 두 역할을 다 하되, 무엇을 눌렀느냐가 아니라 **끌었느냐**로
- * 나눈다: 커서가 화면에서 DragStartThresholdPixels 이상 움직이면 드래그(블록 밀기)이고,
- * 그 전에 떼면 클릭(폰 이동)이다. 그래서 블록 위의 누름은 판정이 날 때까지 보류된다.
+ * 셀 축이 아니라 화면 축인 이유는 카메라가 아이소메트릭이기 때문이다: 월드의 X·Y축은
+ * 화면에서 대각선으로 놓이므로 "W가 어느 셀 축인가"는 카메라 yaw에 달려 있다. 키는
+ * 플레이어가 보는 방향에 고정하고, 셀 축으로의 환산은 ScreenDirToGridDir이 매 입력마다
+ * 다시 한다. 그래서 카메라 각도를 바꿔도 조작이 따라온다.
+ */
+enum class EScreenMoveDir : uint8
+{
+	Up,
+	Right,
+	Down,
+	Left,
+
+	Num
+};
+
+/** 이동 키 방향의 개수. UHT는 배열 크기를 직접 읽으므로 리터럴로 둔다. */
+static constexpr int32 NumScreenMoveDirs = 4;
+static_assert(static_cast<int32>(EScreenMoveDir::Num) == NumScreenMoveDirs, "Keep NumScreenMoveDirs in step with EScreenMoveDir.");
+
+/**
+ * WASD로 그리드를 한 칸씩 걷고, 퍼즐 블록을 누른 채 드래그하면 민다.
+ *
+ * 이동은 키보드, 조작 대상은 마우스로 나뉘어 있다(2026-09-11). 마우스 왼쪽 버튼은 여전히
+ * 무엇을 눌렀느냐가 아니라 **끌었느냐**로 나뉜다: 커서가 화면에서 DragStartThresholdPixels
+ * 이상 움직이면 드래그(블록 밀기)이고, 그 전에 떼면 클릭(탈것 탑승)이다. 그래서 블록 위의
+ * 누름은 판정이 날 때까지 보류된다.
+ *
+ * 두 제스처 모두 **누르고 있는 동안 계속**이다. 이동 키를 누르고 있으면 폰이 막힐 때까지
+ * 정속으로 걷고, 커서를 잡은 지점에서 반 칸 이상 밀어 둔 채로 있으면 블록도 막힐 때까지
+ * 정속으로 밀린다. 이어 붙이는 일은 폰과 블록이 각자의 Tick에서 한다.
  *
  * 블록은 어느 면으로든 잡힌다. 카메라가 가파른 각도로 내려다보므로 블록의 옆면은 커서와
- * 그 뒤 바닥 셀 사이를 가로막지만, 그 셀은 이제 블록을 클릭해서 갈 수 있다: 블록 픽은
- * 블록을 무시하고 다시 트레이스한 FloorCell을 함께 들고 다닌다.
+ * 그 뒤 바닥 셀 사이를 가로막지만, 그 셀로 걸어가는 데에는 이제 커서가 필요 없다.
  *
  * 입력 오브젝트는 C++에서 만들므로 IA_/IMC_ 애셋은 없다.
  */
@@ -174,9 +200,33 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (ClampMin = "0.0"))
 	float DragStartThresholdPixels = 8.0f;
 
+	/**
+	 * 카메라 yaw에 더해 W가 향할 월드 방향을 정하는 각도 (도).
+	 *
+	 * 카메라 정면을 그대로 쓰면 아이소메트릭 각에서 두 축이 정확히 비겨 W가 어느 쪽으로도
+	 * 읽힐 수 있다. -45도는 그 대각선을 한 축으로 돌려 세워, yaw -135도 카메라에서 W가
+	 * 화면 왼쪽 위(서쪽)를 향하게 한다. 카메라 각도를 바꾸면 이 값으로 다시 맞춘다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	float KeyboardYawOffset = -45.0f;
+
 private:
 	void OnPressed();
 	void OnReleased();
+
+	// ---------------------------------------------------------------- 키보드 이동
+
+	void OnMoveKeyPressed(EScreenMoveDir Dir);
+	void OnMoveKeyReleased(EScreenMoveDir Dir);
+
+	/** 이 화면 방향에 묶인 키가 하나라도 실제로 눌려 있는지. 놓친 뗌 이벤트를 걸러낸다. */
+	bool IsMoveKeyDown(EScreenMoveDir Dir) const;
+
+	/** 화면 기준 방향을 지금 카메라에서의 셀 축으로 환산한다. */
+	EGridDirection ScreenDirToGridDir(EScreenMoveDir Dir) const;
+
+	/** 눌려 있는 이동 키를 폰에게 전달한다. 매 틱 돈다. */
+	void UpdateKeyboardMove();
 
 	/** 모든 블록을 무시하고 커서 아래 바닥 셀을 구한다. 바닥 판정의 유일한 규칙이다. */
 	bool TraceFloorIgnoringBlocks(
@@ -245,6 +295,20 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ClickAction;
 
+	/** 화면 기준 이동 액션. EScreenMoveDir로 색인한다. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MoveActions[4];
+
+	/**
+	 * 지금 눌려 있는 이동 키, 누른 순서대로.
+	 *
+	 * **마지막에 누른 키가 이긴다.** 두 키를 함께 누르면 그리드에는 없는 대각선이 되고,
+	 * 한 축을 골라 주면 방금 누른 키가 무시되어 조작이 먹히지 않은 것처럼 보인다. 나중에
+	 * 누른 쪽을 따르면 손가락을 옮겨 짚는 대로 방향이 바뀌고, 그 키를 떼면 아직 누르고
+	 * 있는 이전 키로 되돌아간다.
+	 */
+	TArray<EScreenMoveDir> HeldMoveKeys;
+
 	FString FeedbackText;
 	FLinearColor FeedbackColor = FLinearColor::White;
 
@@ -274,16 +338,13 @@ private:
 
 	TWeakObjectPtr<APuzzleBlock> DraggedBlock;
 
-	/** 커서가 블록의 어디를 잡았는지. 드래그 평면이 이 점을 지난다. */
-	FVector GrabPoint = FVector::ZeroVector;
-
 	/**
-	 * 블록 중심 기준의 그랩 지점.
+	 * 커서가 블록의 어디를 잡았는지. 드래그 평면이 이 점을 지나고, 드래그 방향도 이 점에서 잰다.
 	 *
-	 * 드래그 내내 일정하게 유지해서, 블록의 중심이 포인터 아래로 튀어 오지 않고 잡은
-	 * 자리 그대로 커서를 따라오게 한다.
+	 * 블록 중심 기준의 그랩 오프셋은 2026-09-11에 사라졌다. 블록이 커서를 따라다니던 시절에는
+	 * 잡은 자리를 유지하려고 필요했지만, 이제 커서는 방향만 가리키므로 오프셋이 상쇄된다.
 	 */
-	FVector GrabOffset = FVector::ZeroVector;
+	FVector GrabPoint = FVector::ZeroVector;
 
 	/** 쥔 블록이 이동할 수 있는 축. 잡을 때 한 번 읽는다. */
 	EPuzzleMoveAxis DragAxis = EPuzzleMoveAxis::None;

@@ -538,6 +538,10 @@ void APuzzleBlock::SetHeld(bool bInHeld)
 
 	bHeld = bInHeld;
 
+	// 잡든 놓든 이어 밀 방향은 지운다. 새로 잡은 손이 지난번 제스처의 방향을 물려받아서는
+	// 안 되고, 놓은 블록은 지금 향하던 칸에서 서야 한다.
+	HeldSlideDir.Reset();
+
 	if (bHeld)
 	{
 		StepsWhileHeld = 0;
@@ -550,6 +554,11 @@ void APuzzleBlock::SetHeld(bool bInHeld)
 	{
 		ReportAtRest();
 	}
+}
+
+void APuzzleBlock::SetHeldSlideDirection(TOptional<EGridDirection> Dir)
+{
+	HeldSlideDir = Dir;
 }
 
 void APuzzleBlock::ReportAtRest()
@@ -635,18 +644,43 @@ void APuzzleBlock::Tick(float DeltaSeconds)
 	{
 	case EAnimState::Sliding:
 	{
-		const FVector NewLocation = FMath::VInterpConstantTo(GetActorLocation(), SlideTarget, DeltaSeconds, SlideSpeed);
-		SetActorLocation(NewLocation);
+		// 이번 프레임에 갈 수 있는 거리를 예산으로 두고, 칸에 도착하면 남은 예산을 그대로
+		// 다음 칸으로 이월한다. 도착한 프레임을 그냥 끝내고 다음 틱에 컨트롤러가 다시
+		// 밀어 주기를 기다리면 칸마다 한 프레임씩 서게 되어, 이어 미는 동안 속도가 셀
+		// 경계마다 눈에 띄게 끊긴다.
+		double Budget = static_cast<double>(SlideSpeed) * DeltaSeconds;
 
-		if (NewLocation.Equals(SlideTarget, 0.5))
+		while (Budget > 0.0)
 		{
+			const FVector Location = GetActorLocation();
+			const FVector ToTarget = SlideTarget - Location;
+			const double Remaining = ToTarget.Size();
+
+			// 0.5는 예전 VInterpConstantTo + Equals(0.5) 시절의 도착 허용 오차 그대로다.
+			if (Remaining > Budget + 0.5)
+			{
+				SetActorLocation(Location + ToTarget * (Budget / Remaining));
+				break;
+			}
+
 			SetActorLocation(SlideTarget);
+			Budget -= Remaining;
 			AnimState = EAnimState::Idle;
+
+			// 쥔 손이 여전히 같은 쪽을 가리키고 있으면 곧바로 다음 칸을 시작한다.
+			// StartSlide가 IsAnimating()을 보므로 Idle로 되돌린 뒤에 부른다. 성공할
+			// 때마다 남은 거리가 한 셀만큼 늘어나므로 이 루프는 반드시 끝난다.
+			if (bHeld && HeldSlideDir.IsSet() && StartSlide(HeldSlideDir.GetValue()))
+			{
+				continue;
+			}
 
 			if (!bHeld)
 			{
 				ReportAtRest();
 			}
+
+			break;
 		}
 		break;
 	}

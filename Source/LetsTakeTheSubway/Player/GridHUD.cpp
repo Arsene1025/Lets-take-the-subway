@@ -35,9 +35,9 @@ void AGridHUD::DrawHUD()
 	DrawText(TEXT("GRID MOVEMENT"), FLinearColor::White, X, Y, GEngine->GetMediumFont(), 1.1f);
 	Y += LineHeight * 1.4f;
 
-	DrawText(TEXT("Left Click: move to cell   Left Drag: push a block"), Label, X, Y);
+	DrawText(TEXT("WASD / Arrows: move   Left Drag: push a block"), Label, X, Y);
 	Y += LineHeight;
-	DrawText(TEXT("Click the elevator from a door-side cell to board"), Label, X, Y);
+	DrawText(TEXT("Click an elevator, train or escalator to walk over and board"), Label, X, Y);
 	Y += LineHeight;
 	DrawText(TEXT("Console: ltts.GridDebug 0 | 1 | 2"), Label, X, Y);
 	Y += LineHeight * 1.4f;
@@ -63,9 +63,18 @@ void AGridHUD::DrawHUD()
 		const FIntPoint Current = GridPawn->GetCurrentCell();
 		const FIntPoint Goal = GridPawn->GetGoalCell();
 
+		// 눌린 이동 키가 어느 셀 축으로 읽혔는지. 카메라 각도와 KeyboardYawOffset이 맞는지
+		// 확인하려면 이것이 가장 빠르다.
+		const TOptional<EGridDirection> Held = GridPawn->GetHeldDirection();
+		const FString HeldText = Held.IsSet()
+			? FString::Printf(TEXT("  [holding %s]"),
+				*StaticEnum<EGridDirection>()->GetNameStringByValue(static_cast<int64>(Held.GetValue())))
+			: FString();
+
 		DrawText(
-			FString::Printf(TEXT("Current (%d,%d)%s"), Current.X, Current.Y,
-				GridPawn->IsMoving() ? TEXT("  [moving]") : TEXT("")),
+			FString::Printf(TEXT("Current (%d,%d)%s%s"), Current.X, Current.Y,
+				GridPawn->IsMoving() ? TEXT("  [moving]") : TEXT(""),
+				*HeldText),
 			Value, X, Y);
 		Y += LineHeight;
 
