@@ -13,6 +13,7 @@ class AGridEscalator;
 class AGridPawn;
 class AGridTrain;
 class APuzzleBlock;
+class APuzzleElevatorBlock;
 class APuzzleLever;
 class UInputAction;
 class UInputMappingContext;
@@ -146,6 +147,16 @@ public:
 
 	/** 커서가 무엇 위에 있는지: 블록, 레버, 열차, 바닥 셀, 또는 아무것도 없음. */
 	FCursorPick PickUnderCursor() const;
+
+	/**
+	 * "저 엘리베이터를 타겠다"는 요청. 차체를 클릭하는 것과 같은 뜻이다.
+	 *
+	 * 클릭 경로와 콘솔 명령(ltts.ElevatorRide)이 이 하나를 공유한다. 시험용 경로가 실제
+	 * 경로와 갈라지면 시험이 증명하는 것이 없어진다.
+	 *
+	 * @return 폰이 문 앞으로 출발했거나 그 자리에서 탔으면 true. 거절 사유는 화면에 띄운다.
+	 */
+	bool RequestElevatorBoarding(APuzzleElevatorBlock* Elevator);
 
 	bool IsDraggingBlock() const { return DraggedBlock.IsValid(); }
 

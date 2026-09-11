@@ -7,11 +7,14 @@
 #include "Puzzle/PuzzleElevatorDock.h"
 #include "Puzzle/PuzzleSubsystem.h"
 #include "Player/GridPawn.h"
+#include "Player/GridPlayerController.h"
 // 지금은 쓰지 않는다. GetSeatWorldFor의 ELEVATOR SEAT FACING RIDER 블록을 되살릴 때 필요하다.
 #include "Vehicle/VehicleSeat.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
 #include "UObject/ConstructorHelpers.h"
 
 APuzzleElevatorBlock::APuzzleElevatorBlock()
@@ -583,3 +586,92 @@ void APuzzleElevatorBlock::PostEditChangeProperty(FPropertyChangedEvent& Propert
 }
 
 #endif
+
+// ---------------------------------------------------------------------------- 콘솔
+//
+// 열차의 ltts.TrainArrive와 같은 자리다. 엘리베이터 탑승은 마우스로만 시작할 수 있어서
+// 자동 시험이 닿지 못하는 구석이었다 -- 특히 스테이지 클리어 연출은 탑승부터 컷신까지
+// 한 번에 이어져야 하는데, 그 사슬을 손으로만 확인할 수 있었다.
+//
+// 클릭 경로와 **같은 함수**(RequestElevatorBoarding)를 부른다. 시험용 경로를 따로 만들면
+// 시험이 통과해도 실제 조작이 통과한다는 보장이 없다.
+
+namespace
+{
+	APuzzleElevatorBlock* FindElevator(UWorld* World, const FString& Filter)
+	{
+		APuzzleElevatorBlock* Fallback = nullptr;
+
+		for (TActorIterator<APuzzleElevatorBlock> It(World); It; ++It)
+		{
+			APuzzleElevatorBlock* Elevator = *It;
+			if (!Elevator)
+			{
+				continue;
+			}
+
+			if (!Filter.IsEmpty())
+			{
+				if (Elevator->GetName().Contains(Filter) || Elevator->GetActorNameOrLabel().Contains(Filter))
+				{
+					return Elevator;
+				}
+				continue;
+			}
+
+			// 이름을 주지 않았으면 지금 구조물 위에 올라가 있는 차체를 고른다. 시험하려는
+			// 것이 대개 그것이고, 아니면 아무거나 골라 "구조물 위로 먼저"만 듣게 된다.
+			if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(Elevator))
+			{
+				if (Subsystem->FindDockUnder(*Elevator))
+				{
+					return Elevator;
+				}
+			}
+
+			if (!Fallback)
+			{
+				Fallback = Elevator;
+			}
+		}
+
+		return Fallback;
+	}
+
+	void ElevatorRideCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.ElevatorRide: run this in play mode."));
+			return;
+		}
+
+		AGridPlayerController* Controller =
+			Cast<AGridPlayerController>(World->GetFirstPlayerController());
+		if (!Controller)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.ElevatorRide: no grid player controller."));
+			return;
+		}
+
+		const FString Filter = Args.IsValidIndex(0) ? Args[0] : FString();
+		APuzzleElevatorBlock* Elevator = FindElevator(World, Filter);
+
+		if (!Elevator)
+		{
+			UE_LOG(LogLTTSGrid, Warning,
+				TEXT("ltts.ElevatorRide: no elevator matching '%s'."), *Filter);
+			return;
+		}
+
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("ltts.ElevatorRide: asking to board %s."), *Elevator->GetActorNameOrLabel());
+
+		Controller->RequestElevatorBoarding(Elevator);
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GElevatorRideCommand(
+	TEXT("ltts.ElevatorRide"),
+	TEXT("Board a docked elevator as if it were clicked: ltts.ElevatorRide [name substring]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&ElevatorRideCommand));

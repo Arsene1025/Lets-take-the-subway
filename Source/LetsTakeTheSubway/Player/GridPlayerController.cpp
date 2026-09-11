@@ -461,6 +461,41 @@ void AGridPlayerController::MovePawnToCell(const FIntPoint& Cell)
 
 // ---------------------------------------------------------------------------- 예약 탑승
 
+bool AGridPlayerController::RequestElevatorBoarding(APuzzleElevatorBlock* Elevator)
+{
+	if (!Elevator)
+	{
+		return false;
+	}
+
+	// 층을 옮기는 것은 차체가 아니라 그 아래의 구조물이다. 구조물 위가 아니면 차체는
+	// 그냥 밀 수 있는 상자이며, 그 사실을 누른 자리에서 바로 알려 준다.
+	UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+	APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
+
+	if (!Dock)
+	{
+		ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	// 탈 수 없는 엘리베이터라면 폰을 문 앞까지 걸어 보내 놓고 거기서 거절하는 것보다,
+	// 누른 자리에서 곧바로 이유를 알려 주는 편이 낫다.
+	FText Reason;
+	if (!Dock->CanLaunch(&Reason))
+	{
+		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	// 이 층에서 실제로 탈 수 있는 문 앞 셀만 후보로 삼는다. 샤프트에 걸린 차체는 한쪽
+	// 문이 선로나 다른 층을 향하고 있어, 그쪽으로 폰을 보내면 영영 닿지 못한다.
+	TArray<FIntPoint> DoorCells;
+	Elevator->GetBoardableDoorCells(DoorCells);
+
+	return BeginPendingBoarding(FPendingBoarding::EKind::Elevator, Elevator, DoorCells);
+}
+
 bool AGridPlayerController::BeginPendingBoarding(
 	FPendingBoarding::EKind Kind, AActor* Target, const TArray<FIntPoint>& DoorCells)
 {
@@ -733,32 +768,7 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 	// 것을 뒤쪽 바닥으로 걸어가라는 뜻으로 읽을 수는 없다.
 	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
 	{
-		// 층을 옮기는 것은 차체가 아니라 그 아래의 구조물이다. 구조물 위가 아니면 차체는
-		// 그냥 밀 수 있는 상자이며, 그 사실을 누른 자리에서 바로 알려 준다.
-		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
-		APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
-
-		if (!Dock)
-		{
-			ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		// 탈 수 없는 엘리베이터라면 폰을 문 앞까지 걸어 보내 놓고 거기서 거절하는 것보다,
-		// 누른 자리에서 곧바로 이유를 알려 주는 편이 낫다.
-		FText Reason;
-		if (!Dock->CanLaunch(&Reason))
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		// 이 층에서 실제로 탈 수 있는 문 앞 셀만 후보로 삼는다. 샤프트에 걸린 차체는 한쪽
-		// 문이 선로나 다른 층을 향하고 있어, 그쪽으로 폰을 보내면 영영 닿지 못한다.
-		TArray<FIntPoint> DoorCells;
-		Elevator->GetBoardableDoorCells(DoorCells);
-
-		BeginPendingBoarding(FPendingBoarding::EKind::Elevator, Elevator, DoorCells);
+		RequestElevatorBoarding(Elevator);
 		return;
 	}
 
