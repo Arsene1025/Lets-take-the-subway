@@ -355,3 +355,67 @@ PuzzleElevatorDock_5: stage-clear exit at Z 771; rides 1500 cm up at 120 cm/s, t
 클릭은 이 패널에서 동작하지 않았다. 대신 `AGridActor::PostEditChangeProperty`가 생성 관련 프로퍼티를
 편집하면 `bAutoRegenerateOnEdit`에 따라 `GenerateGrid()`를 부른다는 점을 이용해 `RegionHeight`를
 1101로 바꿨다가 1100으로 되돌렸다. 결과는 버튼을 누른 것과 같고, 최종 값도 원래대로다.
+
+---
+
+## 12. L자 벤치가 밀리지 않던 이유 (2026-09-11)
+
+`BP_Block_LBench`를 드래그해도 어느 방향으로도 움직이지 않았다. 원인이 두 겹이었다.
+
+### 12.1 이동 판정이 빈 영역을 보지 않았다
+
+`APuzzleBlock::CanSlide`가 목적지를 검사할 때 **풋프린트 사각형 전체**를 훑고 있었다.
+
+```cpp
+const FGridRect Target(MinCell + LTTSGrid::DirOffset(Dir), GetWorldFootprint());
+Target.GatherCells(Cells);        // 빈 영역을 건너뛰지 않는다
+```
+
+점유를 등록할 때 쓰는 `GatherOccupiedCells`는 빈 영역과 홈을 제대로 빼는데, 이동을 판정할 때는
+그 함수를 쓰지 않았다. **등록과 판정이 서로 다른 규칙을 쓰고 있었다.** 그래서 L자 벤치가 감싼
+기둥이 자기 빈 자리에 서 있는데도 "Something is in the way."가 됐다.
+
+고친 방법: 슬라이드는 회전 없는 **평행이동**이므로, 지금 점유한 셀을 그대로 옮기면 그것이 목적지의
+점유 셀이다.
+
+```cpp
+TArray<FIntPoint> Cells;
+GatherOccupiedCells(Cells);       // 빈 영역·홈이 이미 빠져 있다
+for (FIntPoint& Cell : Cells) { Cell += Delta; }
+```
+
+가상 함수를 새로 만들지 않아도 파생 클래스의 모양(L자 벤치의 빈 영역, 회전 장애물의 채널)이
+저절로 따라온다. `CanOccupyRect`와 퍼즐 구간 경계는 그대로 사각형으로 본다 -- 전자는 엘리베이터의
+층 검사이고 후자는 "이 조각이 구간 안에 있는가"라 사각형이 맞다.
+
+### 12.2 빈 영역이 꺼져 있었다
+
+`BP_Block_LBench`의 블루프린트 기본값이 `HollowSize = (0,0)`이었다. 배치된 인스턴스 넷도 마찬가지.
+설계는 4x4 중 좌하단 3x3을 비운 L자였는데(`Subway_Stage1.md` 9.2) 그 값이 남아 있지 않았다.
+`Subway_Stage1.md` 9.11에 적어 둔 함정과 같다: **이미 배치된 인스턴스는 나중에 추가된 프로퍼티의
+CDO 값을 물려받지 않는다.**
+
+블루프린트 기본값과 인스턴스 넷에 `HollowOffset (0,0)`, `HollowSize (3,3)`을 넣었다.
+
+### 12.3 기둥은 따라오지 않는다 (기획 확인)
+
+벤치를 밀어도 기둥은 제자리에 남는다. `StartSlide`는 자기 `MinCell`만 옮기고 다른 액터를 데려가지
+않는다. 반대 방향은 다르다: 기둥이 레버로 돌 때는 `GatherRiders`가 안쪽 면에 붙은 블록을 모아 함께
+돌린다(엘리베이터만 제외). 사용자 확인 2026-09-11.
+
+### 12.4 확인
+
+시험용 콘솔 명령 `ltts.BlockSlide <이름 일부> <N|E|S|W>`를 추가했다. 드래그도 마우스로만 시작되어
+자동 시험이 닿지 못하던 구석이다. `CanSlide` → `StartSlide`를 그대로 부르고, 거부당하면 사유를
+로그에 남긴다.
+
+기둥을 감싼 벤치(`BP_Block_LBench`, 셀 (40,111), 기둥은 (41,112) 2x2)로 네 방향을 모두 시험했다.
+
+```
+ltts.BlockSlide: BP_Block_LBench East  -> moving
+ltts.BlockSlide: BP_Block_LBench West  -> moving
+ltts.BlockSlide: BP_Block_LBench North -> moving
+ltts.BlockSlide: BP_Block_LBench South -> moving
+```
+
+기둥과 벤치 사이의 `cell (x,y) is already taken by ...` 경고도 사라졌다.
