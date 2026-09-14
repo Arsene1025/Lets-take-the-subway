@@ -568,7 +568,8 @@ ltts.PawnCamera 1   // 폰을 따라가는 디버그 카메라 켜기 (0이면 �
 <h3>Q. 새 스테이지 레벨(예: Subway_Stage2)을 만들면 무엇을 해야 하나요?</h3>
 <ol>
   <li>Stage Info를 놓고 Stage Index를 2로 합니다.</li>
-  <li>구역 볼륨을 1번부터 놓고 Zone Count를 맞춥니다.</li>
+  <li>구역 볼륨을 1번부터 놓고 Zone Count를 맞춥니다. 구역을 나누지 않는 스테이지는 볼륨 없이 두어도 됩니다(현재 구역은 0).</li>
+  <li>고정 카메라를 쓰면 Zone Cameras에 구역 순서대로 넣습니다. 비워 두면 폰을 따라가는 카메라가 됩니다.</li>
   <li>플레이해서 시작 로그에 경고가 없는지 봅니다.</li>
 </ol>
 <p>코드나 설정 변경은 필요 없습니다.</p>
@@ -598,12 +599,13 @@ ltts.PawnCamera 1   // 폰을 따라가는 디버그 카메라 켜기 (0이면 �
   <tr><td>구역 이동</td><td>새 구역 카메라로 Camera Blend Time 동안 보간</td></tr>
   <tr><td>보간 도중 다시 구역 이동 (되돌아가기 포함)</td><td>지금 보이는 위치에서 새 목표로 이어서 이동. 튀지 않음</td></tr>
   <tr><td>Zone Cameras 칸이 비어 있는 구역</td><td>직전 카메라 유지, 경고 로그</td></tr>
-  <tr><td>StageInfo나 구역 카메라가 없는 맵</td><td>폰이 뷰 타깃으로 남는데 폰 카메라가 꺼져 있어 제대로 보이지 않음. <code>ltts.PawnCamera 1</code>을 켜세요</td></tr>
+  <tr><td>StageInfo가 없거나 Zone Cameras가 통째로 빈 맵 (예: Subway_Stage2)</td><td>폰을 따라가는 스프링암 카메라로 자동 전환. 레벨 시작부터 폰 시점이며 <code>ltts.PawnCamera</code>는 필요 없음. 시작 로그 <code>view follows the pawn (no zone cameras in this level)</code></td></tr>
   <tr><td>보간 중 이동 키</td><td>막지 않음. 네 카메라의 방향이 같아 WASD 방향도 그대로</td></tr>
 </table></div>
 
-<h3>폰을 따라가는 디버그 카메라</h3>
-<p>예전의 폰 스프링암 카메라는 지우지 않고 기본으로 꺼 두었습니다. 구역 카메라를 배치하지 않은 맵을 볼 때 켜서 씁니다. 켜져 있으면 구역 카메라보다 우선합니다.</p>
+<h3>폰을 따라가는 카메라</h3>
+<p>폰 스프링암 카메라는 지우지 않고 기본으로 꺼 두었습니다. 구역 카메라가 하나도 없는 맵에서는 컨트롤러가 자동으로 켭니다(<code>AGridPlayerController::ShouldFollowPawn</code>). 고정 카메라를 두지 않는 스테이지는 Stage Info의 Zone Cameras를 비워 두기만 하면 됩니다.</p>
+<p>아래 스위치는 구역 카메라가 <b>있는</b> 맵에서 강제로 폰을 따라가게 할 때만 씁니다. 켜져 있으면 구역 카메라보다 우선합니다.</p>
 <ul>
   <li><b>플레이 중 켜기:</b> 콘솔에 <code>ltts.PawnCamera 1</code>. 끄면 현재 구역 카메라로 보간해 돌아갑니다. 에디터를 끄기 전까지 다음 PIE에도 유지됩니다.</li>
   <li><b>항상 켜기:</b> <code>AGridPawn::bUsePawnCamera</code> 기본값을 true로 바꿉니다. 코드에서 <code>PAWN CAMERA DISABLED 2026-09-14</code>로 검색하면 관련 지점이 모두 나옵니다.</li>
@@ -614,6 +616,8 @@ ltts.PawnCamera 1   // 폰을 따라가는 디버그 카메라 켜기 (0이면 �
   <tr><th>멤버</th><th>설명</th></tr>
   <tr><td><code>AGridPlayerController::BlendToZoneCamera(ZoneIndex, BlendTime = -1)</code></td><td>그 구역 카메라로 보간. BlendTime 음수면 StageInfo 값</td></tr>
   <tr><td><code>AGridPlayerController::IsBlendingView()</code></td><td>시점이 옮겨 가는 중인지</td></tr>
+  <tr><td><code>AGridPlayerController::HasZoneCameras()</code></td><td>이 레벨에 구역 카메라가 하나라도 있는지. 레벨 시작 판정 전에는 true</td></tr>
+  <tr><td><code>AGridPlayerController::ShouldFollowPawn()</code></td><td>시점이 폰을 따라가야 하는지. 디버그 스위치가 켜졌거나 구역 카메라가 없는 레벨이면 true</td></tr>
   <tr><td><code>AStageInfo::GetZoneCamera(ZoneIndex)</code></td><td>구역 번호(1부터)의 카메라. 없으면 null</td></tr>
   <tr><td><code>UStageSubsystem::GetStageInfo()</code></td><td>레벨의 StageInfo 액터</td></tr>
 </table></div>

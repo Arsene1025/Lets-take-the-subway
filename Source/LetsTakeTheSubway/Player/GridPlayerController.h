@@ -176,6 +176,9 @@ public:
 	 * 폰 디버그 카메라(ltts.PawnCamera)가 켜져 있으면 구역 카메라 대신 폰으로 옮긴다. 그 구역에
 	 * 카메라가 없고 폰 카메라도 꺼져 있으면 시점을 바꾸지 않는다.
 	 *
+	 * 레벨에 구역 카메라가 하나도 없으면(StageInfo가 없거나 ZoneCameras가 비었으면) 폰 카메라를 켜고
+	 * 폰을 따라간다(2026-09-14, ShouldFollowPawn). 폰 카메라를 켜는 곳은 이 함수 하나다.
+	 *
 	 * 구역이 바뀌면 자동으로 불린다. 콘솔 ltts.ZoneCamera로 직접 부를 수도 있다.
 	 *
 	 * @param BlendTime 음수면 AStageInfo::CameraBlendTime을 쓴다. 0이면 즉시.
@@ -186,6 +189,25 @@ public:
 	/** 시점이 한 대상에서 다른 대상으로 옮겨 가는 중인지. */
 	UFUNCTION(BlueprintPure, Category = "Stage Camera")
 	bool IsBlendingView() const;
+
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	/**
+	 * 이 레벨에 구역 카메라가 하나라도 있는지(AStageInfo::ZoneCameras).
+	 *
+	 * 레벨 시작 판정 전(UStageSubsystem::IsResolved가 false)에는 true로 본다. StageInfo가 아직 등록되기
+	 * 전일 수 있어 "없다"고 결론 내리지 않는다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Stage Camera")
+	bool HasZoneCameras() const;
+
+	/**
+	 * 시점이 폰을 따라가야 하는지.
+	 *
+	 * 디버그 스위치(AGridPawn::bUsePawnCamera, ltts.PawnCamera)가 켜졌거나, 구역 카메라가 없는 레벨이면
+	 * true다. 구역 카메라는 있는데 지금 구역의 칸만 비어 있는 것은 여기에 해당하지 않는다(직전 시점 유지).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Stage Camera")
+	bool ShouldFollowPawn() const;
 
 	void ShowFeedback(const FString& Message, const FLinearColor& Color);
 	const FString& GetFeedbackText() const { return FeedbackText; }
@@ -242,8 +264,11 @@ private:
 	void HandleStageStateChanged(const FStageState& State);
 
 	/**
-	 * 폰 카메라 스위치(bUsePawnCamera, ltts.PawnCamera)가 바뀌었으면 카메라 컴포넌트를 맞추고
+	 * 폰을 따라가야 하는지(ShouldFollowPawn)가 바뀌었으면 카메라 컴포넌트를 맞추고
 	 * 시점을 폰 또는 현재 구역 카메라로 보간한다. 매 틱 값만 비교하므로 비용은 없다시피 하다.
+	 *
+	 * 끄는 쪽만 여기서 직접 하고, 켜는 쪽은 BlendToZoneCamera에 맡긴다. 레벨 시작 방송이 첫 PlayerTick보다
+	 * 먼저 오므로 켜는 지점이 둘이면 시작 프레임에 서로 다른 답을 낼 수 있다.
 	 */
 	void SyncPawnCamera();
 

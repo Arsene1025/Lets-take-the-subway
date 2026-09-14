@@ -232,7 +232,7 @@ void UStageSubsystem::ValidateLayout() const
 	if (!Info)
 	{
 		UE_LOG(LogLTTSGrid, Warning,
-			TEXT("StageSubsystem: this level has no AStageInfo. Stage index is 0; place one and set StageIndex."));
+			TEXT("StageSubsystem: this level has no AStageInfo. Stage index is 0; place one and set StageIndex. The view follows the pawn."));
 	}
 	else
 	{
@@ -240,8 +240,10 @@ void UStageSubsystem::ValidateLayout() const
 		const int32 NumZones = ComputeZoneCount(Info);
 		if (Info->ZoneCameras.IsEmpty())
 		{
-			UE_LOG(LogLTTSGrid, Warning,
-				TEXT("StageSubsystem: %s has no ZoneCameras. The view never changes with zones; set ltts.PawnCamera 1 to follow the pawn instead."),
+			// --- PAWN CAMERA DISABLED 2026-09-14 ---
+			// 저작 실수가 아니라 "고정 카메라를 쓰지 않는 스테이지"라는 뜻이다. 컨트롤러가 폰 카메라를 켠다.
+			UE_LOG(LogLTTSGrid, Display,
+				TEXT("StageSubsystem: %s has no ZoneCameras; the view follows the pawn's spring-arm camera. Fill ZoneCameras (one per zone) to use fixed cameras."),
 				*Info->GetName());
 		}
 		else

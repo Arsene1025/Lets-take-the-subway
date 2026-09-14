@@ -19,12 +19,13 @@
 #include "UObject/ConstructorHelpers.h"
 
 // --- PAWN CAMERA DISABLED 2026-09-14 ---
-// 폰을 따라가는 디버그 카메라 스위치. 구역 카메라가 없는 맵을 볼 때 1로 켠다.
+// 폰을 따라가는 카메라를 구역 카메라보다 우선하게 하는 스위치. 구역 카메라가 없는 맵은 이 값과 상관없이
+// 컨트롤러가 폰 카메라를 켠다(AGridPlayerController::ShouldFollowPawn). 구역 카메라가 있는 맵에서만 의미가 있다.
 static TAutoConsoleVariable<int32> CVarPawnCamera(
 	TEXT("ltts.PawnCamera"),
 	0,
-	TEXT("1 = view through the pawn-following debug camera instead of the zone cameras (AStageInfo::ZoneCameras). ")
-	TEXT("Use it on maps without zone cameras. 0 = zone cameras (default)."),
+	TEXT("1 = view through the pawn-following camera instead of the zone cameras (AStageInfo::ZoneCameras). ")
+	TEXT("Maps without zone cameras follow the pawn automatically. 0 = zone cameras (default)."),
 	ECVF_Default);
 
 AGridPawn::AGridPawn()

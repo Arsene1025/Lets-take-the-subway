@@ -135,9 +135,20 @@ void AGridPlayerController::BlendToZoneCamera(int32 ZoneIndex, float BlendTime)
 	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
 
 	AActor* Target = nullptr;
-	if (GridPawn && GridPawn->IsPawnCameraActive())
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	if (GridPawn && ShouldFollowPawn())
 	{
-		// 디버그 카메라가 켜져 있으면 구역과 상관없이 폰을 따라간다.
+		// 디버그 스위치가 켜졌거나 이 레벨에 구역 카메라가 없으면 구역과 상관없이 폰을 따라간다.
+		//
+		// 카메라 컴포넌트는 여기서 켠다. 레벨 시작 방송(HandleStageStateChanged)은 첫 PlayerTick의
+		// SyncPawnCamera보다 먼저 오고, 폰은 이미 뷰 타깃이라 아래 SetViewTargetWithBlend까지 가지 않는다.
+		// 여기서 켜 두지 않으면 첫 프레임이 공 안에서 수평으로 보는 시점이 된다.
+		if (!GridPawn->IsPawnCameraActive())
+		{
+			GridPawn->SetPawnCameraActive(true);
+			UE_LOG(LogLTTSGrid, Display, TEXT("%s: view follows the pawn (%s)."), *GetName(),
+				GridPawn->ShouldUsePawnCamera() ? TEXT("pawn camera switch") : TEXT("no zone cameras in this level"));
+		}
 		Target = GridPawn;
 	}
 	else if (Info)
@@ -147,9 +158,10 @@ void AGridPlayerController::BlendToZoneCamera(int32 ZoneIndex, float BlendTime)
 
 	if (!Target)
 	{
+		// 여기 오는 것은 구역 카메라는 있는데 이 구역의 칸만 비어 있을 때뿐이다. 직전 시점을 유지한다.
 		UE_LOG(LogLTTSGrid, Warning,
-			TEXT("%s: zone %d has no camera and the pawn camera is off; the view stays on %s. Fill AStageInfo::ZoneCameras or set ltts.PawnCamera 1."),
-			*GetName(), ZoneIndex, *GetNameSafe(GetViewTarget()));
+			TEXT("%s: zone %d has no camera (AStageInfo::ZoneCameras[%d] is empty); the view stays on %s."),
+			*GetName(), ZoneIndex, ZoneIndex - 1, *GetNameSafe(GetViewTarget()));
 		return;
 	}
 
@@ -179,6 +191,38 @@ bool AGridPlayerController::IsBlendingView() const
 	return PlayerCameraManager && PlayerCameraManager->PendingViewTarget.Target != nullptr;
 }
 
+// --- PAWN CAMERA DISABLED 2026-09-14 ---
+bool AGridPlayerController::HasZoneCameras() const
+{
+	const UStageSubsystem* Stage = BoundStage.IsValid() ? BoundStage.Get() : UStageSubsystem::Get(this);
+	if (!Stage)
+	{
+		return false;
+	}
+
+	if (!Stage->IsResolved())
+	{
+		// 판정 전에는 StageInfo가 아직 등록되지 않았을 수 있다. 폰 카메라로 넘어가지 않는다.
+		return true;
+	}
+
+	const AStageInfo* Info = Stage->GetStageInfo();
+	return Info && !Info->ZoneCameras.IsEmpty();
+}
+
+bool AGridPlayerController::ShouldFollowPawn() const
+{
+	const AGridPawn* GridPawn = GetGridPawn();
+	if (GridPawn && GridPawn->ShouldUsePawnCamera())
+	{
+		// 디버그 스위치는 언제나 우선한다.
+		return true;
+	}
+
+	// 구역 카메라가 없는 레벨은 폰을 따라간다.
+	return !HasZoneCameras();
+}
+
 void AGridPlayerController::SyncPawnCamera()
 {
 	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
@@ -187,20 +231,23 @@ void AGridPlayerController::SyncPawnCamera()
 		return;
 	}
 
-	const bool bWanted = GridPawn->ShouldUsePawnCamera();
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	const bool bWanted = ShouldFollowPawn();
 	if (bWanted == GridPawn->IsPawnCameraActive())
 	{
 		return;
 	}
 
-	GridPawn->SetPawnCameraActive(bWanted);
+	if (!bWanted)
+	{
+		GridPawn->SetPawnCameraActive(false);
+		UE_LOG(LogLTTSGrid, Display, TEXT("%s: pawn camera off; back to the zone camera."), *GetName());
+	}
 
 	const UStageSubsystem* Stage = BoundStage.Get();
 	const int32 Zone = Stage ? Stage->GetCurrentZoneIndex() : 0;
 
-	UE_LOG(LogLTTSGrid, Display, TEXT("%s: pawn debug camera %s."), *GetName(), bWanted ? TEXT("on") : TEXT("off"));
-
-	// 켜면 폰으로, 끄면 지금 구역의 카메라로 보간해 돌아간다.
+	// 켜는 쪽은 BlendToZoneCamera가 컴포넌트를 켜고 폰으로 보간한다. 끈 뒤에는 지금 구역의 카메라로 돌아간다.
 	BlendToZoneCamera(Zone);
 }
 
