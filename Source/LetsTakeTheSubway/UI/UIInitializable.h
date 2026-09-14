@@ -28,6 +28,6 @@ public:
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
     void InitializeInt(int32 paramInt);
 
-    //UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
-    //void InitializeText(FText paramText);
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
+    void InitializeText(const FText& paramText);
 };

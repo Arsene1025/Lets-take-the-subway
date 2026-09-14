@@ -5,13 +5,8 @@
 #include "CoreMinimal.h"
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Blueprint/UserWidget.h"
+#include "Guide/GuideType.h"
 #include "UIManagerSubsystem.generated.h"
-
-UENUM()
-enum class EGuideType
-{
-
-};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIOpen);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIClose);
