@@ -25,6 +25,7 @@ class AStageZoneVolume;
  *
  * 흐름:
  *   AStageInfo / AStageZoneVolume  --BeginPlay 등록-->  UStageSubsystem
+ *   UWorld::OnWorldBeginPlay(모든 액터 BeginPlay 뒤)  -->  레벨 시작 판정, 첫 방송
  *   AStageZoneVolume  --Begin/EndOverlap(플레이어 폰)-->  NotifyZoneEntered / NotifyZoneLeft
  *   UStageSubsystem  --OnStageZoneChanged / OnStageStateChanged-->  UI
  */
@@ -82,6 +83,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Stage")
 	AStageZoneVolume* GetCurrentZone() const { return CurrentZone.Get(); }
 
+	/** 이 레벨의 스테이지 정보 액터(구역 카메라 목록 포함). 없으면 null. 둘 이상이면 먼저 등록된 것. */
+	UFUNCTION(BlueprintPure, Category = "Stage")
+	AStageInfo* GetStageInfo() const;
+
 	const TArray<TWeakObjectPtr<AStageZoneVolume>>& GetZones() const { return Zones; }
 
 	// ---------------------------------------------------------------- 이벤트
@@ -108,6 +113,9 @@ private:
 	 *
 	 * 폰 스폰 순간의 오버랩은 볼륨이 BeginPlay로 등록하기 전에 오므로 여기까지 오지 못했을 수
 	 * 있다. 점 판정으로 덮어쓰면 이벤트가 왔든 안 왔든 결과가 같다.
+	 *
+	 * 서브시스템의 OnWorldBeginPlay가 아니라 UWorld::OnWorldBeginPlay 방송에서 부른다. 앞의 것은
+	 * 액터 BeginPlay보다 먼저라 볼륨과 StageInfo가 아직 등록 전이다.
 	 */
 	void ResolveInitialZone();
 
@@ -117,7 +125,6 @@ private:
 	/** 등록부에서 State를 다시 만들고, 판정이 끝났다면 바뀐 만큼 방송한다. */
 	void RefreshState(bool bInitialBroadcast = false);
 
-	AStageInfo* GetInfo() const;
 	int32 ComputeZoneCount(const AStageInfo* Info) const;
 	int32 GetMaxZoneIndex() const;
 

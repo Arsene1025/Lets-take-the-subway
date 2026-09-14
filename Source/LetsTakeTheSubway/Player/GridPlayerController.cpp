@@ -13,8 +13,11 @@
 #include "Puzzle/PuzzleLever.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Stage/StageInfo.h"
+#include "Stage/StageSubsystem.h"
 #include "Vehicle/GridTrain.h"
 
+#include "Camera/CameraActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
 #include "EnhancedInputComponent.h"
@@ -77,6 +80,128 @@ void AGridPlayerController::BeginPlay()
 	SetInputMode(InputMode);
 
 	FeedbackText = TEXT("WASD to move. Drag a block to push it.");
+
+	// 구역 카메라. 구역 변경 이벤트가 아니라 상태 이벤트를 받는 이유: 레벨 시작 판정은 구역 0이어도
+	// 반드시 한 번 오므로, 구역 카메라가 없는 맵도 여기서 한 번 확인하고 경고할 수 있다.
+	// 레벨 시작 판정은 모든 액터 BeginPlay가 끝난 뒤(UWorld::OnWorldBeginPlay)라 첫 방송을 놓치지 않는다.
+	if (UStageSubsystem* Stage = UStageSubsystem::Get(this))
+	{
+		Stage->OnStageStateChanged.AddUniqueDynamic(this, &AGridPlayerController::HandleStageStateChanged);
+		BoundStage = Stage;
+
+		if (Stage->IsResolved())
+		{
+			HandleStageStateChanged(Stage->GetState());
+		}
+	}
+}
+
+void AGridPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UStageSubsystem* Stage = BoundStage.Get())
+	{
+		Stage->OnStageStateChanged.RemoveDynamic(this, &AGridPlayerController::HandleStageStateChanged);
+	}
+	BoundStage.Reset();
+
+	Super::EndPlay(EndPlayReason);
+}
+
+// ---------------------------------------------------------------------------- 구역 카메라
+
+void AGridPlayerController::HandleStageStateChanged(const FStageState& State)
+{
+	if (!State.bResolved)
+	{
+		return;
+	}
+
+	const bool bLevelStart = (AppliedZoneIndex == INDEX_NONE);
+	if (!bLevelStart && State.CurrentZoneIndex == AppliedZoneIndex)
+	{
+		return;
+	}
+
+	AppliedZoneIndex = State.CurrentZoneIndex;
+
+	// 레벨 시작은 보간 없이 곧바로 붙인다. 첫 화면에서 카메라가 날아오는 장면이 보이면 안 된다.
+	BlendToZoneCamera(State.CurrentZoneIndex, bLevelStart ? 0.0f : -1.0f);
+}
+
+void AGridPlayerController::BlendToZoneCamera(int32 ZoneIndex, float BlendTime)
+{
+	const UStageSubsystem* Stage = UStageSubsystem::Get(this);
+	const AStageInfo* Info = Stage ? Stage->GetStageInfo() : nullptr;
+	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
+
+	AActor* Target = nullptr;
+	if (GridPawn && GridPawn->IsPawnCameraActive())
+	{
+		// 디버그 카메라가 켜져 있으면 구역과 상관없이 폰을 따라간다.
+		Target = GridPawn;
+	}
+	else if (Info)
+	{
+		Target = Info->GetZoneCamera(ZoneIndex);
+	}
+
+	if (!Target)
+	{
+		UE_LOG(LogLTTSGrid, Warning,
+			TEXT("%s: zone %d has no camera and the pawn camera is off; the view stays on %s. Fill AStageInfo::ZoneCameras or set ltts.PawnCamera 1."),
+			*GetName(), ZoneIndex, *GetNameSafe(GetViewTarget()));
+		return;
+	}
+
+	// 이미 그쪽을 보고 있거나 그쪽으로 옮겨 가는 중이면 건드리지 않는다.
+	const AActor* PendingTarget = PlayerCameraManager ? PlayerCameraManager->PendingViewTarget.Target.Get() : nullptr;
+	const AActor* Destination = PendingTarget ? PendingTarget : GetViewTarget();
+	if (Target == Destination)
+	{
+		return;
+	}
+
+	const float Time = (BlendTime >= 0.0f) ? BlendTime : (Info ? Info->CameraBlendTime : 0.0f);
+	const EViewTargetBlendFunction Function = Info ? Info->CameraBlendFunction.GetValue() : VTBlend_Linear;
+
+	// bLockOutgoing을 켜는 이유: 엔진은 "떠나던 대상으로 되돌아가기"를 블렌드 취소로 처리해 시점을
+	// 순간이동시킨다. 켜 두면 옮겨 가는 도중에 목표가 바뀌어도 지금 보이는 시점에서 이어서 움직인다.
+	// 고정 카메라끼리는 떠나는 쪽이 움직이지 않으므로 잃는 것이 없다.
+	// BlendExp는 EaseIn/Out 계열에만 쓰인다.
+	SetViewTargetWithBlend(Target, Time, Function, /*BlendExp*/ 2.0f, /*bLockOutgoing*/ true);
+
+	UE_LOG(LogLTTSGrid, Display, TEXT("%s: view target -> %s (zone %d, %.2fs)."),
+		*GetName(), *Target->GetActorNameOrLabel(), ZoneIndex, Time);
+}
+
+bool AGridPlayerController::IsBlendingView() const
+{
+	return PlayerCameraManager && PlayerCameraManager->PendingViewTarget.Target != nullptr;
+}
+
+void AGridPlayerController::SyncPawnCamera()
+{
+	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
+	if (!GridPawn)
+	{
+		return;
+	}
+
+	const bool bWanted = GridPawn->ShouldUsePawnCamera();
+	if (bWanted == GridPawn->IsPawnCameraActive())
+	{
+		return;
+	}
+
+	GridPawn->SetPawnCameraActive(bWanted);
+
+	const UStageSubsystem* Stage = BoundStage.Get();
+	const int32 Zone = Stage ? Stage->GetCurrentZoneIndex() : 0;
+
+	UE_LOG(LogLTTSGrid, Display, TEXT("%s: pawn debug camera %s."), *GetName(), bWanted ? TEXT("on") : TEXT("off"));
+
+	// 켜면 폰으로, 끄면 지금 구역의 카메라로 보간해 돌아간다.
+	BlendToZoneCamera(Zone);
 }
 
 void AGridPlayerController::SetupInputComponent()
@@ -1283,6 +1408,8 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	SyncPawnCamera();
+
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
 	// 드래그와 호버 둘 다 플레이어가 보고 있는 높이를 쓰도록 그 앞에서 실행한다.
@@ -1415,3 +1542,31 @@ void AGridPlayerController::UpdateHover()
 	LastHoveredBlock = Pick.Block;
 	bHadHover = true;
 }
+
+// ---------------------------------------------------------------------------- 콘솔
+
+static void ZoneCameraCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!World || Args.Num() < 1)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.ZoneCamera: usage ltts.ZoneCamera <ZoneIndex> [BlendSeconds]"));
+		return;
+	}
+
+	AGridPlayerController* Controller = Cast<AGridPlayerController>(World->GetFirstPlayerController());
+	if (!Controller)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.ZoneCamera: no grid player controller."));
+		return;
+	}
+
+	const int32 ZoneIndex = FCString::Atoi(*Args[0]);
+	const float BlendSeconds = (Args.Num() >= 2) ? FCString::Atof(*Args[1]) : -1.0f;
+	Controller->BlendToZoneCamera(ZoneIndex, BlendSeconds);
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GZoneCameraCommand(
+	TEXT("ltts.ZoneCamera"),
+	TEXT("Blend the view to a zone camera without walking there: ltts.ZoneCamera <ZoneIndex> [BlendSeconds]. ")
+	TEXT("BlendSeconds defaults to AStageInfo::CameraBlendTime; 0 switches instantly."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&ZoneCameraCommand));

@@ -14,8 +14,18 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+
+// --- PAWN CAMERA DISABLED 2026-09-14 ---
+// 폰을 따라가는 디버그 카메라 스위치. 구역 카메라가 없는 맵을 볼 때 1로 켠다.
+static TAutoConsoleVariable<int32> CVarPawnCamera(
+	TEXT("ltts.PawnCamera"),
+	0,
+	TEXT("1 = view through the pawn-following debug camera instead of the zone cameras (AStageInfo::ZoneCameras). ")
+	TEXT("Use it on maps without zone cameras. 0 = zone cameras (default)."),
+	ECVF_Default);
 
 AGridPawn::AGridPawn()
 {
@@ -75,6 +85,11 @@ AGridPawn::AGridPawn()
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
 	Camera->bUsePawnControlRotation = false;
+
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	// 기본으로 꺼 둔다. 시점은 구역 카메라가 맡는다. BeginPlay에서 bUsePawnCamera / ltts.PawnCamera를
+	// 보고 다시 켠다. 스프링암은 그대로 둔다: 카메라가 꺼져 있으면 아무것도 그리지 않는다.
+	Camera->SetAutoActivate(false);
 }
 
 void AGridPawn::BeginPlay()
@@ -86,6 +101,9 @@ void AGridPawn::BeginPlay()
 		SpringArm->TargetArmLength = CameraArmLength;
 		SpringArm->SetWorldRotation(CameraRotation);
 	}
+
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	SetPawnCameraActive(ShouldUsePawnCamera());
 
 	// 디자이너가 인스턴스에서 반지름을 조정할 수 있으니, 콜리전 없는 바운드와 보이는
 	// 공을 그 값에 맞춰 둔다.
@@ -313,6 +331,25 @@ void AGridPawn::StopAndSnapToCurrentCell(const FString& Reason, const FLinearCol
 		Color);
 
 	RefreshPathDebug();
+}
+
+// --- PAWN CAMERA DISABLED 2026-09-14 ---
+bool AGridPawn::ShouldUsePawnCamera() const
+{
+	return bUsePawnCamera || CVarPawnCamera.GetValueOnGameThread() != 0;
+}
+
+bool AGridPawn::IsPawnCameraActive() const
+{
+	return Camera && Camera->IsActive();
+}
+
+void AGridPawn::SetPawnCameraActive(bool bActive)
+{
+	if (Camera)
+	{
+		Camera->SetActive(bActive);
+	}
 }
 
 void AGridPawn::TeleportToCell(FIntPoint Cell)

@@ -11,6 +11,7 @@
 #include "Stage/StageSubsystem.h"
 #include "Stage/StageZoneVolume.h"
 
+#include "Camera/PlayerCameraManager.h"
 #include "Components/BoxComponent.h"
 #include "DrawDebugHelpers.h"
 
@@ -154,6 +155,35 @@ void AGridHUD::DrawHUD()
 					false, -1.0f, 0, bIsCurrent ? 6.0f : 2.0f);
 			}
 		}
+	}
+
+	// 지금 시점을 맡은 대상. 구역 카메라, 보간 중인지, 폰 디버그 카메라인지.
+	if (GridController)
+	{
+		const APlayerCameraManager* CameraManager = GridController->PlayerCameraManager;
+		const AActor* ViewTarget = GridController->GetViewTarget();
+		const AActor* PendingTarget = CameraManager ? CameraManager->PendingViewTarget.Target.Get() : nullptr;
+
+		FString ViewText = FString::Printf(TEXT("View %s"), ViewTarget ? *ViewTarget->GetActorNameOrLabel() : TEXT("none"));
+		if (PendingTarget)
+		{
+			ViewText += FString::Printf(TEXT(" -> %s [blending]"), *PendingTarget->GetActorNameOrLabel());
+		}
+
+		FLinearColor ViewColor = Label;
+		if (GridPawn && GridPawn->IsPawnCameraActive())
+		{
+			ViewText += TEXT("   [pawn debug camera: ltts.PawnCamera 0 to turn off]");
+		}
+		else if (GridPawn && ViewTarget == GridPawn && !PendingTarget)
+		{
+			// 폰이 뷰 타깃인데 폰 카메라가 꺼져 있으면 공 안에서 수평으로 보는 이상한 시점이 된다.
+			ViewText += TEXT("   [no zone camera and pawn camera off: ltts.PawnCamera 1]");
+			ViewColor = FLinearColor(1.0f, 0.35f, 0.3f);
+		}
+
+		DrawText(ViewText, ViewColor, X, Y);
+		Y += LineHeight;
 	}
 
 	// 행인은 퍼즐에 속하지 않으므로 서브시스템이 아니라 월드에서 직접 센다.
