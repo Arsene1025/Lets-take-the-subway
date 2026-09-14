@@ -187,6 +187,28 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Train|Body")
 	TObjectPtr<UMaterialInterface> ArtFallbackMaterial;
 
+	// ---------------------------------------------------------------- 탑승 셀 자동 계산
+
+	/**
+	 * 문 앞에서 승강장 쪽으로 몇 칸까지 탑승 셀을 찾을지.
+	 *
+	 * 차체 반폭 바로 바깥 칸부터 센다. 승강장과 선로 사이에 턱이나 틈이 있어 승강장이
+	 * 몇 칸 떨어져 있으면 이 값을 늘린다. Subway_Stage2의 입구·서쪽 승강장은 5번째 칸에
+	 * 있다(2026-09-14 노선 연장). BoardingCells를 손으로 적은 정차역에는 쓰이지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Boarding", meta = (ClampMin = 1, ClampMax = 16))
+	int32 BoardingSearchCells = 6;
+
+	/**
+	 * 탑승 셀로 인정할 바닥 높이 범위(cm). 선로 높이(배치 Z) 기준 위아래로 이만큼.
+	 *
+	 * 선로 옆의 낮은 턱도 걸을 수 있는 셀로 구워지므로, 높이를 보지 않으면 폰이 갈 수 없는
+	 * 턱 위에 탑승 셀이 잡힌다. Stage1 승강장은 +98, Stage2 승강장은 +132, Stage2 턱은
+	 * -224 cm다. 0 이하면 높이를 보지 않는다(이전 동작).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Boarding", meta = (ClampMin = 0.0))
+	float BoardingFloorTolerance = 150.0f;
+
 	// ---------------------------------------------------------------- 가감속
 
 	/**

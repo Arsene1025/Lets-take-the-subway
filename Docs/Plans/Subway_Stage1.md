@@ -407,12 +407,15 @@ L벤치의 빈 영역은 실측으로 정했다. 빈 레벨에 `SM_LBench_001`�
 ### 9.3 레벨 배치 (`Subway_Stage1`)
 
 - **`StationGrid`** (−11500, −2500, −250), 140x125셀, RegionHeight 1100, Step 100, Slope 45.
+  → 2026-09-14 노선 연장으로 **140x215셀**. 서쪽 역이 +Y 8797.55 이동했다(`StageRailExtension.md`).
 - **블록 25개**: 벤치 7 + L벤치 4 + 자판기 5 + 기둥 9. 원본 스태틱 메시 액터는 삭제했다.
   겹치는 셀 **0개**(스크립트로 전수 검사), 점유 셀 129개.
 - **`ElevatorCar2`**(`APuzzleElevatorBlock`, 사용자 배치) 셀 (110,42) 4x4 B1, yaw 90, 아트 `BP_elevator`.
 - **`ElevatorRegion`**(`APuzzleRegion`) 'ElevatorShaft' 셀 (106,42) 8x4.
 - **`PuzzleElevatorDock`**: 위치는 그대로 두고 `TargetFloorCell` (110,43), 출구 North.
 - **`Train_Line1`**(`BP_Train_Subway`) (−1250, 3750, −124) yaw −90, 정차역 2개.
+  → 2026-09-14: `Tunnel_North` `StopCell` (102,112) → (102,200), `Speed` 2350 · Accel 0.2 · Decel 0.15 ·
+  MinSpeedFactor 0.25로 구간 10초. 서쪽 `PuzzleElevatorDock2` `TargetFloorCell` (62,118) → (62,206).
   느슨한 `SM_Subway*` 액터 30개는 삭제했다.
 - 마커 4개: 개찰구 3개(동쪽 2·서쪽 1)와 `ShaftMouth_Walkable` 1개.
 - `PlayerStart`를 개찰구 셀 밖(50, −250)으로 옮겼다.
