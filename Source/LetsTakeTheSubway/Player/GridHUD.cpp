@@ -8,6 +8,11 @@
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Stage/StageSubsystem.h"
+#include "Stage/StageZoneVolume.h"
+
+#include "Components/BoxComponent.h"
+#include "DrawDebugHelpers.h"
 
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
@@ -116,6 +121,39 @@ void AGridHUD::DrawHUD()
 
 		DrawText(Status, Label, X, Y);
 		Y += LineHeight;
+	}
+
+	// 스테이지·구역. UI 매니저가 받는 값과 같은 스냅샷이다.
+	if (const UStageSubsystem* Stage = UStageSubsystem::Get(this))
+	{
+		const FStageState& StageState = Stage->GetState();
+		const FString StageText = StageState.bResolved
+			? FString::Printf(TEXT("Stage %d '%s'   zone %d / %d '%s'"),
+				StageState.StageIndex, *StageState.StageName.ToString(),
+				StageState.CurrentZoneIndex, StageState.ZoneCount, *StageState.CurrentZoneName.ToString())
+			: FString(TEXT("Stage [unresolved]"));
+		DrawText(StageText, Value, X, Y);
+		Y += LineHeight;
+
+		// 레벨 2에서는 구역 박스를 그린다. 현재 구역은 초록, 나머지는 회색. 매 프레임 한 프레임짜리로 그린다.
+		if (LTTSGridDebug::ShouldDrawWorld())
+		{
+			const AStageZoneVolume* Current = Stage->GetCurrentZone();
+			for (const TWeakObjectPtr<AStageZoneVolume>& Entry : Stage->GetZones())
+			{
+				const AStageZoneVolume* Zone = Entry.Get();
+				const UBoxComponent* ZoneBox = Zone ? Zone->GetBox() : nullptr;
+				if (!ZoneBox)
+				{
+					continue;
+				}
+
+				const bool bIsCurrent = Zone == Current;
+				DrawDebugBox(GetWorld(), ZoneBox->GetComponentLocation(), ZoneBox->GetScaledBoxExtent(),
+					ZoneBox->GetComponentQuat(), bIsCurrent ? FColor::Green : FColor(140, 140, 140),
+					false, -1.0f, 0, bIsCurrent ? 6.0f : 2.0f);
+			}
+		}
 	}
 
 	// 행인은 퍼즐에 속하지 않으므로 서브시스템이 아니라 월드에서 직접 센다.

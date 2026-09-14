@@ -22,6 +22,9 @@ class UStaticMeshComponent;
  * 동작한다.
  *
  * 몸체는 공이다: 그리드 셀 하나에 들어가는 1 m 구체이고 이동하면서 굴러간다.
+ *
+ * 예외는 ZoneProbe 하나다. 공 중심의 작은 구체가 구역 볼륨(AStageZoneVolume)과만 오버랩한다.
+ * 막는 응답이 없고 스윕도 하지 않으므로 이동에는 영향이 없다.
  */
 UCLASS()
 class LETSTAKETHESUBWAY_API AGridPawn : public APawn
@@ -218,6 +221,16 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn")
 	TObjectPtr<UStaticMeshComponent> BodyMesh;
+
+	/**
+	 * 구역 볼륨 감지용 프로브. 오직 StageZone 채널에만 Overlap으로 응답한다.
+	 *
+	 * 몸체 Sphere(반지름 BallRadius)를 쓰지 않는 이유: 50 cm 공으로 재면 구역이 반 칸 일찍 바뀌고,
+	 * 셀 경계에 맞춘 박스와 표면이 맞닿아 EndOverlap이 늦게 올 수 있다. 중심의 작은 구체는 "폰이
+	 * 경계를 넘는 순간"에 바뀌고, UStageSubsystem의 레벨 시작 점 판정과도 결과가 같다.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn")
+	TObjectPtr<USphereComponent> ZoneProbe;
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn|Camera")
 	TObjectPtr<USpringArmComponent> SpringArm;

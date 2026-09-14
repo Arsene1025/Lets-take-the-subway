@@ -6,6 +6,7 @@
 #include "Grid/GridActor.h"
 #include "Grid/GridDebug.h"
 #include "Player/GridPlayerController.h"
+#include "Stage/StageTypes.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
@@ -26,6 +27,18 @@ AGridPawn::AGridPawn()
 	Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Sphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 	Sphere->SetGenerateOverlapEvents(false);
+
+	// 구역 볼륨만 보는 프로브. 오브젝트 타입과 전체 Ignore를 먼저 정하고 StageZone 채널만 연다.
+	ZoneProbe = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneProbe"));
+	ZoneProbe->SetupAttachment(Sphere);
+	ZoneProbe->InitSphereRadius(8.0f);
+	ZoneProbe->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	ZoneProbe->SetCollisionObjectType(ECC_Pawn);
+	ZoneProbe->SetCollisionResponseToAllChannels(ECR_Ignore);
+	ZoneProbe->SetCollisionResponseToChannel(LTTSStage::ZoneObjectChannel, ECR_Overlap);
+	ZoneProbe->SetGenerateOverlapEvents(true);
+	ZoneProbe->SetCanEverAffectNavigation(false);
+	ZoneProbe->SetHiddenInGame(true);
 
 	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
 	BodyMesh->SetupAttachment(Sphere);

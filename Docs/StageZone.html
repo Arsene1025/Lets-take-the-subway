@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StageZone 연결 가이드</title>
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --panel: #ffffff;
+    --ink: #1f2328;
+    --muted: #5d6570;
+    --line: #dedbd2;
+    --accent: #0a7ea4;
+    --accent-soft: #e3f2f7;
+    --warn: #9a5b00;
+    --warn-soft: #fff3dc;
+    --ok: #237a3b;
+    --ok-soft: #e4f4e8;
+    --code-bg: #f0eee8;
+    --code-ink: #24292f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15181c;
+      --panel: #1d2126;
+      --ink: #e6e8eb;
+      --muted: #9aa3ad;
+      --line: #2f353c;
+      --accent: #4cc2e6;
+      --accent-soft: #15313b;
+      --warn: #f0b45a;
+      --warn-soft: #3a2c16;
+      --ok: #6fd08a;
+      --ok-soft: #1a3322;
+      --code-bg: #111418;
+      --code-ink: #d7dde3;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15181c;
+    --panel: #1d2126;
+    --ink: #e6e8eb;
+    --muted: #9aa3ad;
+    --line: #2f353c;
+    --accent: #4cc2e6;
+    --accent-soft: #15313b;
+    --warn: #f0b45a;
+    --warn-soft: #3a2c16;
+    --ok: #6fd08a;
+    --ok-soft: #1a3322;
+    --code-bg: #111418;
+    --code-ink: #d7dde3;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.7 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    padding-inline: 16px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding-block: 40px 80px; }
+  header h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  .meta { font-size: 0.85rem; color: var(--muted); margin-top: 10px; }
+
+  nav.toc {
+    margin: 28px 0 8px;
+    padding: 14px 18px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  nav.toc ol { margin: 0; padding-left: 1.3em; columns: 2; column-gap: 32px; }
+  nav.toc li { break-inside: avoid; }
+  @media (max-width: 640px) { nav.toc ol { columns: 1; } }
+
+  h2 {
+    font-size: 1.35rem;
+    margin: 48px 0 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    scroll-margin-top: 16px;
+  }
+  h3 { font-size: 1.05rem; margin: 26px 0 8px; }
+  a { color: var(--accent); }
+  p, li { max-width: 72ch; }
+  code {
+    font-family: "Cascadia Code", "D2Coding", Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 0.84rem;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .file { font-size: 0.8rem; color: var(--muted); margin: 14px 0 -6px; font-family: Consolas, monospace; }
+
+  .table-wrap { overflow-x: auto; margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; background: var(--panel); font-size: 0.92rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+
+  .callout { border-radius: 8px; padding: 12px 16px; margin: 16px 0; border: 1px solid var(--line); }
+  .callout.warn { background: var(--warn-soft); border-color: transparent; }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok { background: var(--ok-soft); border-color: transparent; }
+  .callout.ok strong { color: var(--ok); }
+  .callout.info { background: var(--accent-soft); border-color: transparent; }
+  .callout p { margin: 4px 0; }
+
+  .answer {
+    background: var(--panel);
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 16px 0;
+  }
+  .answer .verdict { font-size: 1.1rem; font-weight: 700; margin: 0 0 6px; }
+
+  ol.steps { counter-reset: s; list-style: none; padding-left: 0; }
+  ol.steps > li { counter-increment: s; position: relative; padding-left: 42px; margin-bottom: 14px; }
+  ol.steps > li::before {
+    content: counter(s);
+    position: absolute; left: 0; top: 1px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: var(--panel);
+    font-weight: 700; font-size: 0.85rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .diagram { overflow-x: auto; margin: 16px 0; }
+  .diagram svg { display: block; min-width: 640px; max-width: 100%; height: auto; margin: 0 auto; }
+  .diagram .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .diagram .box.hl { stroke: var(--accent); stroke-width: 2; }
+  .diagram .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
+  .diagram .s { fill: var(--muted); font-size: 11px; }
+  .diagram .arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .diagram .lbl { fill: var(--accent); font-size: 11px; }
+  .diagram .head { fill: var(--muted); }
+
+  .timeline { list-style: none; padding: 0; margin: 12px 0; border-left: 2px solid var(--line); }
+  .timeline li { position: relative; padding: 4px 0 10px 20px; }
+  .timeline li::before {
+    content: ""; position: absolute; left: -7px; top: 11px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--panel); border: 2px solid var(--muted);
+  }
+  .timeline li.key::before { background: var(--accent); border-color: var(--accent); }
+  .timeline b { display: block; }
+  .timeline span { color: var(--muted); font-size: 0.92rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>StageZone 연결 가이드</h1>
+  <p>스테이지 번호, 구역 개수, 현재 구역을 UI 매니저에 전달하는 시스템의 구조, 레벨 설정법, 연결법을 정리한 문서입니다.</p>
+  <div class="meta">대상 브랜치 PROG_1 · UE 5.8 · 코드 위치 <code>Source/LetsTakeTheSubway/Stage/</code></div>
+</header>
+
+<nav class="toc" aria-label="목차">
+  <ol>
+    <li><a href="#summary">한눈에 보기</a></li>
+    <li><a href="#classes">클래스별 역할</a></li>
+    <li><a href="#level">레벨 설정 방법</a></li>
+    <li><a href="#ui-cpp">UI 매니저 연결 (C++)</a></li>
+    <li><a href="#ui-bp">UI 연결 (블루프린트)</a></li>
+    <li><a href="#api">API 레퍼런스</a></li>
+    <li><a href="#rules">구역 판정 규칙</a></li>
+    <li><a href="#lifecycle">생명주기와 방송 시점</a></li>
+    <li><a href="#debug">검증과 디버그</a></li>
+    <li><a href="#faq">레벨 전환 시 관리 (FAQ)</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================== -->
+<h2 id="summary">1. 한눈에 보기</h2>
+
+<p>UI에 넘기는 정보는 세 가지이며, 모두 <code>UStageSubsystem</code>이 <code>FStageState</code> 하나로 묶어 들고 있습니다.</p>
+
+<div class="table-wrap"><table>
+  <tr><th>정보</th><th>필드</th><th>어디서 정하나</th></tr>
+  <tr><td>현재 스테이지 번호</td><td><code>StageIndex</code></td><td>레벨에 놓은 <code>AStageInfo</code></td></tr>
+  <tr><td>스테이지의 총 구역 개수</td><td><code>ZoneCount</code></td><td><code>AStageInfo::ZoneCount</code>. 0이면 배치된 볼륨의 최대 번호</td></tr>
+  <tr><td>플레이어가 있는 구역</td><td><code>CurrentZoneIndex</code></td><td><code>AStageZoneVolume</code>에 폰이 들어갈 때 갱신</td></tr>
+</table></div>
+
+<div class="diagram" role="img" aria-label="레벨 액터가 서브시스템에 등록하고, 볼륨 오버랩이 서브시스템에 통보되며, 서브시스템이 델리게이트로 UI 매니저에 알리는 흐름">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="head"/>
+    </marker>
+  </defs>
+  <rect class="box" x="10" y="20" width="200" height="62" rx="8"/>
+  <text class="t" x="24" y="46">AStageInfo</text>
+  <text class="s" x="24" y="66">레벨당 1개 · 스테이지 번호, 구역 수</text>
+
+  <rect class="box" x="10" y="110" width="200" height="62" rx="8"/>
+  <text class="t" x="24" y="136">AStageZoneVolume ×N</text>
+  <text class="s" x="24" y="156">구역 번호 · 박스 오버랩</text>
+
+  <rect class="box" x="10" y="190" width="200" height="50" rx="8"/>
+  <text class="t" x="24" y="212">AGridPawn</text>
+  <text class="s" x="24" y="230">ZoneProbe (8 cm 구체)</text>
+
+  <rect class="box hl" x="300" y="70" width="210" height="110" rx="10"/>
+  <text class="t" x="316" y="98">UStageSubsystem</text>
+  <text class="s" x="316" y="118">UWorldSubsystem · 레벨마다 생성</text>
+  <text class="s" x="316" y="138">FStageState 소유</text>
+  <text class="s" x="316" y="158">OnStageZoneChanged</text>
+  <text class="s" x="316" y="172">OnStageStateChanged</text>
+
+  <rect class="box" x="580" y="85" width="170" height="80" rx="8"/>
+  <text class="t" x="594" y="112">UI 매니저</text>
+  <text class="s" x="594" y="132">ULocalPlayerSubsystem</text>
+  <text class="s" x="594" y="150">(팀원 작업)</text>
+
+  <path class="arrow" d="M210,51 C255,51 255,95 298,100" marker-end="url(#ah)"/>
+  <text class="lbl" x="220" y="44">BeginPlay 등록</text>
+  <path class="arrow" d="M210,141 L298,141" marker-end="url(#ah)"/>
+  <text class="lbl" x="218" y="134">Enter / Leave 통보</text>
+  <path class="arrow" d="M110,190 L110,174" marker-end="url(#ah)"/>
+  <text class="lbl" x="118" y="186">오버랩</text>
+  <path class="arrow" d="M510,125 L578,125" marker-end="url(#ah)"/>
+  <text class="lbl" x="516" y="116">델리게이트</text>
+</svg>
+</div>
+
+<div class="callout warn">
+  <p><strong>처음 받은 뒤 에디터를 한 번 재시작해야 합니다.</strong> <code>Config/DefaultEngine.ini</code>에 새 오브젝트 채널 <code>StageZone</code>이 추가됐고, 콜리전 채널은 에디터 시작 때만 읽힙니다. 재시작 후 에디터 타깃을 빌드하면 됩니다.</p>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="classes">2. 클래스별 역할</h2>
+
+<p>정보의 <b>소유자</b>는 월드 서브시스템이고, UI 매니저는 <b>소비자</b>입니다. 스테이지가 곧 레벨이므로, 레벨과 수명이 같은 월드 서브시스템에 두면 레벨 전환 때 지워 줄 코드가 필요 없습니다.</p>
+
+<div class="table-wrap"><table>
+  <tr><th>클래스 / 파일</th><th>종류</th><th>역할</th></tr>
+  <tr><td><code>UStageSubsystem</code><br><span class="file">Stage/StageSubsystem.h</span></td><td>UWorldSubsystem</td><td>등록부, 현재 구역 판정, 상태 스냅샷, 델리게이트 방송</td></tr>
+  <tr><td><code>AStageZoneVolume</code><br><span class="file">Stage/StageZoneVolume.h</span></td><td>AActor</td><td>구역 하나를 덮는 박스. 폰이 드나들면 서브시스템에 알림</td></tr>
+  <tr><td><code>AStageInfo</code><br><span class="file">Stage/StageInfo.h</span></td><td>AInfo</td><td>스테이지 번호, 이름, 총 구역 수를 저작. 레벨당 하나</td></tr>
+  <tr><td><code>FStageState</code>, 델리게이트 선언<br><span class="file">Stage/StageTypes.h</span></td><td>USTRUCT</td><td>UI가 받는 스냅샷, 전용 채널 상수 <code>LTTSStage::ZoneObjectChannel</code></td></tr>
+  <tr><td><code>AGridPawn::ZoneProbe</code><br><span class="file">Player/GridPawn.h</span></td><td>USphereComponent</td><td>폰 중심의 8 cm 구체. StageZone 채널에만 Overlap으로 응답</td></tr>
+  <tr><td><code>AGridHUD</code><br><span class="file">Player/GridHUD.cpp</span></td><td>AHUD</td><td>디버그 줄과 구역 박스 표시 (검증용)</td></tr>
+</table></div>
+
+<h3>왜 GameInstance가 아닌가</h3>
+<ul>
+  <li><b>현재 구역은 레벨이 바뀌면 사라져야 하는 값입니다.</b> GameInstance에 두면 레벨마다 초기화를 잊지 않아야 합니다.</li>
+  <li><b>레벨을 넘어 남아야 하는 값이 생기면 그것만 따로 둡니다.</b> 클리어한 스테이지 목록이나 이어하기 번호가 그 예입니다. 이때는 <code>UGameInstanceSubsystem</code>을 추가하면 되고, 기본 GameInstance에 자동으로 생성되므로 <code>GameInstanceClass</code> 설정도 필요 없습니다.</li>
+</ul>
+
+<!-- ============================================================== -->
+<h2 id="level">3. 레벨 설정 방법</h2>
+
+<ol class="steps">
+  <li>
+    <b>스테이지 정보 액터를 하나 놓습니다.</b><br>
+    Place Actors 창에서 <code>Stage Info</code>를 검색해 레벨 아무 곳에 놓습니다. 위치는 상관없습니다.
+    <div class="table-wrap"><table>
+      <tr><th>속성</th><th>값</th></tr>
+      <tr><td>Stage Index</td><td>스테이지 번호. <code>Subway_Stage1</code>이면 1</td></tr>
+      <tr><td>Stage Name</td><td>UI에 보일 이름. 비워도 됨</td></tr>
+      <tr><td>Zone Count</td><td>총 구역 수. 명시를 권장. 0이면 볼륨에서 유도</td></tr>
+    </table></div>
+  </li>
+  <li>
+    <b>구역마다 볼륨을 놓습니다.</b><br>
+    <code>Stage Zone Volume</code>을 놓고 <b>Shape › Box Extent</b>로 크기를 맞춥니다. 에디터에서 청록색 테두리로 보이고 게임에서는 보이지 않습니다.
+    <div class="table-wrap"><table>
+      <tr><th>속성</th><th>값</th></tr>
+      <tr><td>Zone Index</td><td>1부터 빈 번호 없이</td></tr>
+      <tr><td>Zone Name</td><td>UI에 보일 구역 이름. 예: 동쪽 대합실</td></tr>
+    </table></div>
+  </li>
+  <li>
+    <b>경계는 셀 경계에 맞춥니다.</b><br>
+    구역은 폰 <b>중심</b>이 박스 경계를 넘는 순간 바뀝니다. 그리드 1칸은 100 cm이고, Box Extent는 절반 크기이므로 2×2칸이면 Extent X, Y가 100입니다.
+  </li>
+  <li>
+    <b>높이는 넉넉히 줍니다.</b><br>
+    폰 중심은 바닥에서 50 cm 위에 있습니다. 같은 구역에 계단이나 위층이 있으면 그 높이까지 덮어야 합니다.
+  </li>
+  <li>
+    <b>ㄱ자처럼 사각형이 아닌 구역은 박스 여러 개로 덮습니다.</b><br>
+    같은 Zone Index를 준 볼륨 여러 개는 하나의 구역으로 취급합니다. 박스끼리 겹쳐도 됩니다.
+  </li>
+  <li>
+    <b>플레이해서 로그를 확인합니다.</b><br>
+    출력 로그에서 <code>StageSubsystem</code>으로 필터링하면 시작 판정 결과와 저작 경고가 나옵니다. 자세한 내용은 <a href="#debug">9절</a>을 보세요.
+  </li>
+</ol>
+
+<div class="callout info">
+  <p><b>Collision 카테고리는 일부러 숨겨 두었습니다.</b> 볼륨의 콜리전 설정은 코드가 정하며, 바꾸면 아트 메시와 오버랩이 나거나 감지가 멈춥니다.</p>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="ui-cpp">4. UI 매니저 연결 (C++)</h2>
+
+<p>UI 매니저는 <code>ULocalPlayerSubsystem</code>이라 레벨이 바뀌어도 살아남습니다. 반면 <code>UStageSubsystem</code>은 레벨마다 새로 생깁니다. 그래서 <b><code>PlayerControllerChanged</code>가 올 때마다 이전 바인딩을 풀고 새로 바인딩</b>하는 것이 핵심입니다.</p>
+
+<p>이 함수는 레벨이 열려 플레이어 컨트롤러가 로컬 플레이어에 붙을 때 엔진이 부릅니다. 이 시점에는 아직 액터들의 BeginPlay 전이라 상태가 비어 있을 수 있습니다. 판정이 끝나면 <code>OnStageStateChanged</code>가 반드시 한 번 오므로 그걸 기다리면 됩니다.</p>
+
+<p class="file">UIManagerSubsystem.h (예시 이름)</p>
+<pre><code>#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/LocalPlayerSubsystem.h"
+#include "Stage/StageTypes.h"
+#include "UIManagerSubsystem.generated.h"
+
+class UStageSubsystem;
+
+UCLASS()
+class LETSTAKETHESUBWAY_API UUIManagerSubsystem : public ULocalPlayerSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void PlayerControllerChanged(APlayerController* NewPlayerController) override;
+    virtual void Deinitialize() override;
+
+private:
+    void BindStage(UStageSubsystem* Stage);
+    void UnbindStage();
+
+    // 델리게이트가 Dynamic이므로 핸들러는 UFUNCTION이어야 합니다.
+    UFUNCTION()
+    void HandleStageStateChanged(const FStageState&amp; State);
+
+    UFUNCTION()
+    void HandleStageZoneChanged(int32 PrevZoneIndex, int32 NewZoneIndex);
+
+    // 레벨이 닫히면 사라지는 객체이므로 약참조로 듭니다.
+    TWeakObjectPtr&lt;UStageSubsystem&gt; BoundStage;
+};</code></pre>
+
+<p class="file">UIManagerSubsystem.cpp</p>
+<pre><code>#include "UIManagerSubsystem.h"
+
+#include "Stage/StageSubsystem.h"
+#include "GameFramework/PlayerController.h"
+
+void UUIManagerSubsystem::PlayerControllerChanged(APlayerController* NewPlayerController)
+{
+    Super::PlayerControllerChanged(NewPlayerController);
+
+    // 이전 레벨의 서브시스템에서 먼저 떨어집니다.
+    UnbindStage();
+
+    // 새 컨트롤러가 속한 월드의 서브시스템. 메인 메뉴처럼 게임 월드가 아니면 null입니다.
+    BindStage(UStageSubsystem::Get(NewPlayerController));
+}
+
+void UUIManagerSubsystem::Deinitialize()
+{
+    UnbindStage();
+    Super::Deinitialize();
+}
+
+void UUIManagerSubsystem::BindStage(UStageSubsystem* Stage)
+{
+    if (!Stage)
+    {
+        return;
+    }
+
+    Stage-&gt;OnStageStateChanged.AddUniqueDynamic(this, &amp;ThisClass::HandleStageStateChanged);
+    Stage-&gt;OnStageZoneChanged.AddUniqueDynamic(this, &amp;ThisClass::HandleStageZoneChanged);
+    BoundStage = Stage;
+
+    // 이미 판정이 끝난 뒤에 붙었다면 지금 값을 바로 그립니다.
+    // 보통은 판정 전이라 여기서는 넘어가고, 곧 OnStageStateChanged가 옵니다.
+    if (Stage-&gt;IsResolved())
+    {
+        HandleStageStateChanged(Stage-&gt;GetState());
+    }
+}
+
+void UUIManagerSubsystem::UnbindStage()
+{
+    if (UStageSubsystem* Stage = BoundStage.Get())
+    {
+        Stage-&gt;OnStageStateChanged.RemoveDynamic(this, &amp;ThisClass::HandleStageStateChanged);
+        Stage-&gt;OnStageZoneChanged.RemoveDynamic(this, &amp;ThisClass::HandleStageZoneChanged);
+    }
+    BoundStage.Reset();
+}
+
+void UUIManagerSubsystem::HandleStageStateChanged(const FStageState&amp; State)
+{
+    // 예: "스테이지 1 · 구역 2 / 5"
+    // State.StageIndex, State.StageName, State.ZoneCount,
+    // State.CurrentZoneIndex, State.CurrentZoneName
+}
+
+void UUIManagerSubsystem::HandleStageZoneChanged(int32 PrevZoneIndex, int32 NewZoneIndex)
+{
+    // 구역 진입 연출 등 "바뀐 순간"에만 필요한 처리.
+    // 레벨 시작 때는 PrevZoneIndex = 0 으로 한 번 옵니다.
+}</code></pre>
+
+<div class="callout ok">
+  <p><strong>델리게이트 두 개 중 무엇을 쓰나.</strong> 화면 숫자를 그리는 용도라면 <code>OnStageStateChanged</code> 하나로 충분합니다. 구역이 바뀌는 순간의 연출이 필요할 때만 <code>OnStageZoneChanged</code>를 추가로 받으세요. 둘 다 오는 경우 <code>OnStageZoneChanged</code>가 먼저 오며, 그때 <code>GetState()</code>는 이미 새 값입니다.</p>
+</div>
+
+<div class="callout warn">
+  <p><strong>Build.cs.</strong> 스테이지 시스템 자체는 추가 모듈이 필요 없습니다. UI 매니저에서 위젯을 쓰면 그쪽 작업에서 <code>"UMG", "Slate", "SlateCore"</code>를 <code>LetsTakeTheSubway.Build.cs</code>에 추가해야 합니다.</p>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="ui-bp">5. UI 연결 (블루프린트)</h2>
+
+<p>위젯 블루프린트나 레벨 블루프린트에서 바로 쓸 수도 있습니다. 월드 서브시스템은 블루프린트에서 <b>Get StageSubsystem</b> 노드로 얻습니다.</p>
+<ol>
+  <li><b>Event Construct</b> 또는 BeginPlay에서 <b>Get StageSubsystem</b>을 호출합니다.</li>
+  <li>반환값에서 <b>Bind Event to On Stage State Changed</b>를 연결하고, 커스텀 이벤트에서 <b>Break StageState</b>로 값을 꺼냅니다.</li>
+  <li>바인딩 직후 <b>Is Resolved</b>가 참이면 <b>Get State</b> 결과로 한 번 직접 갱신합니다.</li>
+</ol>
+<p>위젯의 수명이 레벨과 같다면 레벨 전환 시 재바인딩을 신경 쓸 필요가 없습니다. 레벨을 넘어 살아남는 위젯이라면 C++ 예시처럼 컨트롤러가 바뀔 때마다 다시 바인딩해야 합니다.</p>
+
+<!-- ============================================================== -->
+<h2 id="api">6. API 레퍼런스</h2>
+
+<h3>UStageSubsystem</h3>
+<div class="table-wrap"><table>
+  <tr><th>멤버</th><th>설명</th></tr>
+  <tr><td><code>static Get(WorldContext)</code></td><td>그 객체가 속한 월드의 서브시스템. 게임, PIE 월드가 아니면 null</td></tr>
+  <tr><td><code>GetState()</code></td><td><code>const FStageState&amp;</code> 현재 스냅샷. 블루프린트 Pure</td></tr>
+  <tr><td><code>GetStageIndex()</code> <code>GetZoneCount()</code> <code>GetCurrentZoneIndex()</code></td><td>스냅샷 필드 단축 조회</td></tr>
+  <tr><td><code>IsResolved()</code></td><td>레벨 시작 판정이 끝났는지. false면 값이 비어 있을 수 있음</td></tr>
+  <tr><td><code>GetCurrentZone()</code></td><td>현재 구역 볼륨 액터. 없으면 null</td></tr>
+  <tr><td><code>OnStageZoneChanged(Prev, New)</code></td><td>구역 번호가 실제로 바뀔 때만. 시작 판정 때 (0, 시작 구역)으로 1회</td></tr>
+  <tr><td><code>OnStageStateChanged(State)</code></td><td>필드가 하나라도 바뀌면. 시작 판정 때 반드시 1회</td></tr>
+</table></div>
+
+<h3>FStageState</h3>
+<div class="table-wrap"><table>
+  <tr><th>필드</th><th>타입</th><th>의미</th></tr>
+  <tr><td><code>StageIndex</code></td><td>int32</td><td>1부터. <code>AStageInfo</code>가 없으면 0</td></tr>
+  <tr><td><code>StageName</code></td><td>FText</td><td>스테이지 표시 이름</td></tr>
+  <tr><td><code>ZoneCount</code></td><td>int32</td><td>총 구역 수</td></tr>
+  <tr><td><code>CurrentZoneIndex</code></td><td>int32</td><td>1부터. 아직 어느 구역에도 들어간 적 없으면 0</td></tr>
+  <tr><td><code>CurrentZoneName</code></td><td>FText</td><td>현재 구역 표시 이름</td></tr>
+  <tr><td><code>bResolved</code></td><td>bool</td><td>시작 판정 완료 여부</td></tr>
+</table></div>
+
+<!-- ============================================================== -->
+<h2 id="rules">7. 구역 판정 규칙</h2>
+
+<div class="table-wrap"><table>
+  <tr><th>상황</th><th>현재 구역</th></tr>
+  <tr><td>볼륨 하나 안</td><td>그 볼륨</td></tr>
+  <tr><td>볼륨 두 개가 겹친 곳</td><td>마지막으로 들어간 볼륨</td></tr>
+  <tr><td>겹친 곳에서 하나를 벗어남</td><td>아직 안에 있는 볼륨 중 가장 최근 것</td></tr>
+  <tr><td>모든 볼륨 밖 (구역 사이 틈)</td><td><b>마지막 구역 유지.</b> UI가 깜빡이지 않게 하려는 것</td></tr>
+  <tr><td>열차, 에스컬레이터, 엘리베이터에 탄 채 경계 통과</td><td>정상적으로 바뀜</td></tr>
+  <tr><td>행인 NPC가 볼륨 통과</td><td>무시. 플레이어 폰(<code>AGridPawn</code>)만 셈</td></tr>
+  <tr><td>레벨 시작 위치</td><td>폰 중심 좌표로 점 판정. 어느 볼륨에도 없으면 0과 경고</td></tr>
+</table></div>
+
+<p>셀 도착 알림 대신 오버랩을 쓰는 이유는 탈것 때문입니다. 탈것에 실려 가는 동안 폰은 셀에 도착하지 않지만 위치는 계속 바뀌므로, 오버랩은 그 사이의 구역 변화도 잡습니다.</p>
+
+<h3>콜리전 구성</h3>
+<div class="table-wrap"><table>
+  <tr><th>컴포넌트</th><th>오브젝트 타입</th><th>응답</th><th>오버랩 이벤트</th></tr>
+  <tr><td>볼륨 <code>Box</code></td><td>StageZone (GameTraceChannel1)</td><td>전부 Ignore, Pawn만 Overlap</td><td>켜짐</td></tr>
+  <tr><td>폰 <code>ZoneProbe</code></td><td>Pawn</td><td>전부 Ignore, StageZone만 Overlap</td><td>켜짐</td></tr>
+  <tr><td>폰 몸체 <code>Sphere</code>, <code>BodyMesh</code></td><td colspan="3">변경 없음. 콜리전 없음</td></tr>
+</table></div>
+<p>전용 채널의 기본 응답이 Ignore라서 기존 아트 메시, 퍼즐 블록, 열차, 커서 트레이스, 그리드 생성 트레이스는 볼륨과 프로브를 보지 못합니다. 막는 응답이 없고 폰은 스윕 이동을 하지 않으므로 이동에도 영향이 없습니다.</p>
+
+<!-- ============================================================== -->
+<h2 id="lifecycle">8. 생명주기와 방송 시점</h2>
+
+<p>레벨이 열릴 때의 순서입니다. UI가 붙는 시점이 액터 BeginPlay보다 빠르다는 점이 중요합니다.</p>
+
+<ul class="timeline">
+  <li><b>월드 초기화</b><span><code>UStageSubsystem</code> 생성. 이 시점 등록부는 비어 있음</span></li>
+  <li><b>배치 액터 컴포넌트 초기화</b><span>볼륨의 오버랩 핸들러 바인딩 (<code>PostInitializeComponents</code>)</span></li>
+  <li class="key"><b>플레이어 컨트롤러 스폰</b><span>UI 매니저의 <code>PlayerControllerChanged</code> 호출. 여기서 바인딩. 상태는 아직 <code>bResolved = false</code></span></li>
+  <li><b>폰 스폰</b><span>첫 오버랩이 계산되지만 볼륨이 아직 등록 전이라 신뢰하지 않음</span></li>
+  <li><b>모든 액터 BeginPlay</b><span><code>AStageInfo</code>, 볼륨이 서브시스템에 등록. 폰이 셀에 정렬</span></li>
+  <li class="key"><b>OnWorldBeginPlay</b><span>폰 위치로 시작 구역을 다시 판정하고 저작 오류를 검사한 뒤, 두 델리게이트를 1회 방송</span></li>
+  <li><b>플레이 중</b><span>볼륨 오버랩마다 판정, 바뀐 경우에만 방송</span></li>
+  <li><b>레벨 종료</b><span>월드 정리 중 발생하는 EndOverlap은 무시. 서브시스템이 델리게이트를 비우고 사라짐</span></li>
+</ul>
+
+<!-- ============================================================== -->
+<h2 id="debug">9. 검증과 디버그</h2>
+
+<h3>콘솔</h3>
+<pre><code>ltts.GridDebug 1    // HUD에 "Stage 1 'Name'   zone 2 / 5 'Zone'" 줄 표시
+ltts.GridDebug 2    // 추가로 구역 박스를 월드에 그림 (현재 구역 초록, 나머지 회색)</code></pre>
+
+<h3>로그 (카테고리 LogLTTSGrid)</h3>
+<div class="table-wrap"><table>
+  <tr><th>메시지</th><th>뜻과 조치</th></tr>
+  <tr><td><code>stage 1 'X', 5 zones; player starts in zone 1 'Y'.</code></td><td>정상 시작 판정</td></tr>
+  <tr><td><code>zone 1 -> 2 'Y'.</code></td><td>구역 변경</td></tr>
+  <tr><td><code>this level has no AStageInfo</code></td><td>Stage Info를 놓으세요</td></tr>
+  <tr><td><code>this level has N AStageInfo actors</code></td><td>하나만 남기세요</td></tr>
+  <tr><td><code>this level has no AStageZoneVolume</code></td><td>구역 볼륨을 놓으세요</td></tr>
+  <tr><td><code>no volume uses zone index N</code></td><td>번호가 비어 있습니다</td></tr>
+  <tr><td><code>says ZoneCount A but the highest placed zone index is B</code></td><td>Zone Count와 볼륨 번호를 맞추세요. 값은 Zone Count를 씁니다</td></tr>
+  <tr><td><code>zone index N is shared by M volumes</code></td><td>정보. 의도한 분할 박스라면 무시</td></tr>
+  <tr><td><code>player pawn ... starts outside every stage zone</code></td><td>시작 위치를 덮는 볼륨이 없습니다</td></tr>
+</table></div>
+
+<h3>수동 확인 목록</h3>
+<ul>
+  <li>WASD로 경계를 넘을 때 폰 중심이 넘는 순간 번호가 바뀌는지.</li>
+  <li>되돌아오면 이전 번호로 돌아가는지.</li>
+  <li>열차, 에스컬레이터, 엘리베이터로 경계를 넘을 때도 바뀌는지.</li>
+  <li>볼륨을 놓은 채 Generate Grid를 눌러도 walkable, blocked 수치가 그대로인지.</li>
+  <li>블록 드래그, 레버, 탈것 클릭이 전과 같은지.</li>
+  <li>PIE를 두 번 연속 실행해도 두 번 모두 판정 로그가 나오는지.</li>
+</ul>
+
+<!-- ============================================================== -->
+<h2 id="faq">10. 레벨 전환 시 관리 (FAQ)</h2>
+
+<h3>Q. UPuzzleSubsystem은 스테이지가 넘어갈 때마다 관리해 줘야 하나요? 직접 해야 하나요?</h3>
+
+<div class="answer">
+  <p class="verdict">아니요. 따로 관리할 필요가 없고, 직접 할 일도 없습니다.</p>
+  <p>엔진이 레벨마다 새로 만들고 레벨이 닫힐 때 함께 없앱니다. <code>UStageSubsystem</code>도 같습니다.</p>
+</div>
+
+<p>근거는 다음과 같습니다.</p>
+<ul>
+  <li><b>월드 서브시스템은 월드와 수명이 같습니다.</b> <code>OpenLevel</code>로 레벨을 바꾸면 이전 월드가 파괴되며 그 서브시스템도 정리되고, 새 월드가 만들어질 때 새 인스턴스가 생깁니다. PIE를 껐다 켤 때도 같습니다.</li>
+  <li><b>레벨 밖으로 새는 상태가 없습니다.</b> 코드를 확인한 결과 <code>UPuzzleSubsystem</code>에는 static 변수, 타이머, 외부 델리게이트 바인딩, <code>Initialize</code>나 <code>Deinitialize</code> 재정의가 없습니다.</li>
+  <li><b>등록부는 액터가 스스로 관리합니다.</b> 블록, 바닥 타일, 장애물, 레버, 구간, 열차가 모두 BeginPlay에서 등록하고 EndPlay에서 해제합니다. 목록도 약참조라 사라진 액터를 붙들지 않습니다.</li>
+  <li><b>폰, 컨트롤러 조회도 매번 월드에서 새로 찾습니다.</b> 저장해 두는 포인터가 없습니다.</li>
+</ul>
+
+<h3>Q. 그럼 직접 관리가 필요해지는 경우는요?</h3>
+<div class="table-wrap"><table>
+  <tr><th>상황</th><th>해야 할 일</th></tr>
+  <tr><td>레벨을 넘어 남아야 하는 데이터 (클리어 기록, 수집품, 이어하기)</td><td><code>UGameInstanceSubsystem</code>을 새로 만들어 거기에 둡니다. 월드 서브시스템에 두면 레벨 전환 때 사라집니다</td></tr>
+  <tr><td>레벨을 넘어 살아남는 객체가 월드 서브시스템에 바인딩</td><td>UI 매니저처럼 <code>PlayerControllerChanged</code>에서 풀고 다시 바인딩합니다 (4절)</td></tr>
+  <tr><td>퍼즐 서브시스템에 static 캐시나 타이머를 추가</td><td><code>Deinitialize</code>에서 비우거나 해제합니다</td></tr>
+  <tr><td>퍼즐 조각을 서브레벨 스트리밍으로 넣고 빼기</td><td>조치 불필요. EndPlay가 호출되어 자동 해제됩니다</td></tr>
+</table></div>
+
+<h3>Q. 새 스테이지 레벨(예: Subway_Stage2)을 만들면 무엇을 해야 하나요?</h3>
+<ol>
+  <li>Stage Info를 놓고 Stage Index를 2로 합니다.</li>
+  <li>구역 볼륨을 1번부터 놓고 Zone Count를 맞춥니다.</li>
+  <li>플레이해서 시작 로그에 경고가 없는지 봅니다.</li>
+</ol>
+<p>코드나 설정 변경은 필요 없습니다.</p>
+
+</div>
+</body>
+</html>
