@@ -1,8 +1,9 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Puzzle/PuzzleRotatingPillar.h"
 
 #include "LetsTakeTheSubway.h"
+#include "Art/ArtMaterialUtil.h"
 #include "Grid/GridActor.h"
 
 #include "Components/StaticMeshComponent.h"
@@ -43,9 +44,21 @@ APuzzleRotatingPillar::APuzzleRotatingPillar()
 
 void APuzzleRotatingPillar::NormaliseAuthoring()
 {
-	// 부모의 정규화는 부르지 않는다: 홀짝 규칙은 1x1이 이미 만족하고, 홈 클램프는 홈을
-	// 최소 1x1로 되살려 버린다.
-	FootprintSize = FIntPoint(1, 1);
+	// 부모의 정규화는 부르지 않는다: 홈 클램프가 홈을 최소 1x1로 되살려 버리고, 부모가
+	// 강제하는 최소 2x2도 기둥에는 맞지 않는다.
+	//
+	// 기둥은 **정사각형**이면 된다. 두 변이 같으면 홀짝 규칙(양변의 홀짝이 같아야 한다)이
+	// 저절로 만족되고, GetRegion()이 돌려주는 회전 정사각형이 풋프린트와 정확히 겹쳐
+	// 제자리 회전이 성립한다. 1x1로 못박아 두면 2 m짜리 아트 기둥이 셀 하나에 담기지
+	// 않아 이웃 셀을 시각적으로 침범한다.
+	const int32 Side = FMath::Max(1, FMath::Max(FootprintSize.X, FootprintSize.Y));
+	if (FootprintSize.X != FootprintSize.Y)
+	{
+		UE_LOG(LogLTTSGrid, Warning,
+			TEXT("%s: a pillar must be square; footprint %dx%d widened to %dx%d."),
+			*GetName(), FootprintSize.X, FootprintSize.Y, Side, Side);
+	}
+	FootprintSize = FIntPoint(Side, Side);
 	ChannelOffset = FIntPoint(0, 0);
 	ChannelSize = FIntPoint(0, 0);
 	MoveAxis = EPuzzleMoveAxis::None;
@@ -97,8 +110,6 @@ void APuzzleRotatingPillar::GetWorldAttachDirections(TArray<EGridDirection>& Out
 
 bool APuzzleRotatingPillar::IsAttachedToInnerFace(const APuzzleBlock& Block) const
 {
-	const FIntPoint Pillar = GetPillarCell();
-
 	TArray<EGridDirection> Dirs;
 	GetWorldAttachDirections(Dirs);
 	if (Dirs.IsEmpty())
@@ -109,13 +120,30 @@ bool APuzzleRotatingPillar::IsAttachedToInnerFace(const APuzzleBlock& Block) con
 	TArray<FIntPoint> Cells;
 	Block.GatherOccupiedCells(Cells);
 
+	const FGridRect Rect = GetRect();
+	TArray<FIntPoint> Own;
+	Rect.GatherCells(Own);
+
 	// 큰 장애물과 같은 기준이다: 블록 셀 하나가 부착 면과 변을 공유하면 블록 전체가 함께
 	// 돈다. 기둥에서 멀리 뻗어 나간 나머지 셀은 그대로 실려 간다.
+	//
+	// 면 전체를 훑는다. 기둥이 2x2 이상이면 한 면이 여러 셀에 걸치므로, 모서리 셀의
+	// 이웃 하나만 보면 그 면 가운데에 붙은 블록을 놓친다.
 	for (const EGridDirection Dir : Dirs)
 	{
-		if (Cells.Contains(Pillar + LTTSGrid::DirOffset(Dir)))
+		const FIntPoint Step = LTTSGrid::DirOffset(Dir);
+		for (const FIntPoint& Cell : Own)
 		{
-			return true;
+			const FIntPoint Outside = Cell + Step;
+			if (Rect.Contains(Outside))
+			{
+				// 안쪽 이웃이다 -- 이 셀은 그 면에 접해 있지 않다.
+				continue;
+			}
+			if (Cells.Contains(Outside))
+			{
+				return true;
+			}
 		}
 	}
 	return false;
@@ -134,8 +162,29 @@ void APuzzleRotatingPillar::GatherOccupiedCells(TArray<FIntPoint>& OutCells) con
 void APuzzleRotatingPillar::RefreshVisual()
 {
 	// 일부러 부모를 부르지 않는다: 부모는 홈 둘레 슬랩 네 장을 배치한다.
+	//
+	// 부모의 아트 처리(ArtMesh 컴포넌트 갱신)는 여기서 직접 한다. 부모의 RefreshVisual을
+	// 통째로 부를 수 없어서다.
+	if (ArtMeshComponent)
+	{
+		if (ArtMeshComponent->GetStaticMesh() != ArtMesh)
+		{
+			ArtMeshComponent->SetStaticMesh(ArtMesh);
+		}
+		ArtMeshComponent->SetRelativeTransform(ArtMeshOffset);
+		ArtMeshComponent->SetVisibility(ArtMesh != nullptr);
+		LTTSArt::ReplaceDefaultMaterials(*ArtMeshComponent, ArtFallbackMaterial);
+	}
+
+	// 아트가 붙으면 그레이박스 원기둥은 숨긴다. 콜리전은 남긴다 -- 커서가 잡는 것은 언제나
+	// 셀 하나 크기의 이 프록시이지 아트 기둥의 실루엣이 아니다.
+	const bool bArt = IsUsingArtVisual();
+
 	const double CellSize = Grid ? Grid->CellSize : 100.0;
-	const double Half = CellSize * 0.5;
+
+	// 기둥은 정사각형이므로 한 변의 길이 하나로 비주얼이 정해진다.
+	const double Span = FMath::Max(1, FootprintSize.X) * CellSize;
+	const double Half = Span * 0.5;
 
 	for (int32 Index = 0; Index < SlabMeshes.Num(); ++Index)
 	{
@@ -146,13 +195,13 @@ void APuzzleRotatingPillar::RefreshVisual()
 		}
 
 		const bool bUsed = (Index == 0);
-		Slab->SetVisibility(bUsed);
+		Slab->SetVisibility(bUsed && !bArt);
 		Slab->SetCollisionEnabled(bUsed ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 
 		if (bUsed)
 		{
 			Slab->SetRelativeLocation(FVector(0.0, 0.0, Height * 0.5));
-			Slab->SetRelativeScale3D(FVector(CellSize / 100.0, CellSize / 100.0, Height / 100.0));
+			Slab->SetRelativeScale3D(FVector(Span / 100.0, Span / 100.0, Height / 100.0));
 		}
 	}
 
@@ -175,7 +224,9 @@ void APuzzleRotatingPillar::RefreshVisual()
 			continue;
 		}
 
-		Face->SetVisibility(bFaceUsed[Index]);
+		// 아트 위에는 빗금 패널을 그리지 않는다. 부착 면은 레버 피드백과 실제 회전으로
+		// 읽히며, 아트 기둥 표면에 그레이박스 판이 떠 있으면 그 편이 더 혼란스럽다.
+		Face->SetVisibility(bFaceUsed[Index] && !bArt);
 		if (!bFaceUsed[Index])
 		{
 			continue;
@@ -189,24 +240,24 @@ void APuzzleRotatingPillar::RefreshVisual()
 		case FaceIndexWest:
 			Location.X = -Half - FaceThickness * 0.5;
 			Scale.X = FaceThickness / 100.0;
-			Scale.Y = CellSize / 100.0;
+			Scale.Y = Span / 100.0;
 			break;
 
 		case FaceIndexEast:
 			Location.X = Half + FaceThickness * 0.5;
 			Scale.X = FaceThickness / 100.0;
-			Scale.Y = CellSize / 100.0;
+			Scale.Y = Span / 100.0;
 			break;
 
 		case FaceIndexSouth:
 			Location.Y = -Half - FaceThickness * 0.5;
-			Scale.X = CellSize / 100.0;
+			Scale.X = Span / 100.0;
 			Scale.Y = FaceThickness / 100.0;
 			break;
 
 		default:	// North
 			Location.Y = Half + FaceThickness * 0.5;
-			Scale.X = CellSize / 100.0;
+			Scale.X = Span / 100.0;
 			Scale.Y = FaceThickness / 100.0;
 			break;
 		}
@@ -268,10 +319,10 @@ bool APuzzleRotatingPillar::CanEditChange(const FProperty* InProperty) const
 		return true;
 	}
 
-	// 크기는 1x1로 고정이고 홈은 없다. 셋 다 값을 바꿔도 정규화가 되돌린다.
+	// 홈은 없다. 값을 바꿔도 정규화가 되돌린다. 풋프린트는 편집할 수 있다 -- 정사각형이기만
+	// 하면 되며, 정사각형이 아니면 정규화가 넓은 쪽으로 맞춘다.
 	const FName Name = InProperty->GetFName();
-	return Name != GET_MEMBER_NAME_CHECKED(APuzzleBlock, FootprintSize)
-		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleRotatingObstacle, ChannelOffset)
+	return Name != GET_MEMBER_NAME_CHECKED(APuzzleRotatingObstacle, ChannelOffset)
 		&& Name != GET_MEMBER_NAME_CHECKED(APuzzleRotatingObstacle, ChannelSize);
 }
 

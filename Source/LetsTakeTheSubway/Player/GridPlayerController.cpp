@@ -25,6 +25,38 @@
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 
+namespace
+{
+	/** 화면 방향 하나와 거기에 묶인 키들. */
+	struct FMoveKeyBinding
+	{
+		EScreenMoveDir Dir;
+		const TCHAR* ActionName;
+		FKey Keys[2];
+	};
+
+	/**
+	 * 이동 키 표.
+	 *
+	 * 매핑 컨텍스트를 만들 때와, 놓친 뗌 이벤트를 걸러낼 때가 같은 표를 본다. 두 곳에 따로
+	 * 적어 두면 한쪽만 고쳤을 때 키가 영영 눌린 것으로 남아 폰이 혼자 걸어간다.
+	 *
+	 * 파일 범위 전역이 아니라 함수 안의 정적 변수인 이유는 FKey 때문이다. EKeys의 키들은
+	 * 엔진이 시작하면서 초기화하므로, 전역으로 두면 그보다 먼저 만들어질 수 있다.
+	 */
+	const TArray<FMoveKeyBinding>& GetMoveKeyBindings()
+	{
+		static const TArray<FMoveKeyBinding> Bindings = {
+			{ EScreenMoveDir::Up,    TEXT("GridMoveUp"),    { EKeys::W, EKeys::Up } },
+			{ EScreenMoveDir::Right, TEXT("GridMoveRight"), { EKeys::D, EKeys::Right } },
+			{ EScreenMoveDir::Down,  TEXT("GridMoveDown"),  { EKeys::S, EKeys::Down } },
+			{ EScreenMoveDir::Left,  TEXT("GridMoveLeft"),  { EKeys::A, EKeys::Left } },
+		};
+
+		return Bindings;
+	}
+}
+
 AGridPlayerController::AGridPlayerController()
 {
 	bShowMouseCursor = true;
@@ -44,7 +76,7 @@ void AGridPlayerController::BeginPlay()
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
 
-	FeedbackText = TEXT("Click a cell to move. Drag a block to push it.");
+	FeedbackText = TEXT("WASD to move. Drag a block to push it.");
 }
 
 void AGridPlayerController::SetupInputComponent()
@@ -59,6 +91,19 @@ void AGridPlayerController::SetupInputComponent()
 		ClickAction->ValueType = EInputActionValueType::Boolean;
 
 		MappingContext->MapKey(ClickAction, EKeys::LeftMouseButton);
+
+		for (const FMoveKeyBinding& Binding : GetMoveKeyBindings())
+		{
+			UInputAction* Action = NewObject<UInputAction>(this, Binding.ActionName);
+			Action->ValueType = EInputActionValueType::Boolean;
+
+			for (const FKey& Key : Binding.Keys)
+			{
+				MappingContext->MapKey(Action, Key);
+			}
+
+			MoveActions[static_cast<int32>(Binding.Dir)] = Action;
+		}
 	}
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
@@ -71,6 +116,18 @@ void AGridPlayerController::SetupInputComponent()
 	{
 		EnhancedInput->BindAction(ClickAction, ETriggerEvent::Started, this, &AGridPlayerController::OnPressed);
 		EnhancedInput->BindAction(ClickAction, ETriggerEvent::Completed, this, &AGridPlayerController::OnReleased);
+
+		for (const FMoveKeyBinding& Binding : GetMoveKeyBindings())
+		{
+			UInputAction* Action = MoveActions[static_cast<int32>(Binding.Dir)];
+			if (!Action)
+			{
+				continue;
+			}
+
+			EnhancedInput->BindAction(Action, ETriggerEvent::Started, this, &AGridPlayerController::OnMoveKeyPressed, Binding.Dir);
+			EnhancedInput->BindAction(Action, ETriggerEvent::Completed, this, &AGridPlayerController::OnMoveKeyReleased, Binding.Dir);
+		}
 	}
 }
 
@@ -164,11 +221,25 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 			return Pick;
 		}
 
-		// 열차는 문이 열려 있고 폰이 그 문 앞에 서 있을 때만 잡는다. 그 밖의 경우에는
-		// 없는 셈 치고 뒤쪽 바닥을 클릭하게 둔다 -- 차체가 승강장 셀을 통째로 가리기 때문이다.
+		// 열차는 어느 면을 눌러도, 언제 눌러도 잡는다. 누르면 폰이 가장 가까운 문 앞까지
+		// 걸어가 기다리므로 "지금 탈 수 있는가"는 더 이상 커서가 답할 질문이 아니다.
+		//
+		// --- TRAIN PICK GATED BY CanBoard DISABLED 2026-09-11 ---
+		// 예전에는 폰이 문 앞 셀에 서 있을 때만 열차를 잡았다. 차체가 승강장 셀을 통째로
+		// 가리기 때문인데, 그 대가로 문 앞이 아닌 곳에서 누르면 클릭이 뒤쪽 바닥으로 흘러가
+		// 폰이 말없이 걸어가 버렸다. 차체 뒤 승강장 셀을 클릭할 수 없게 되는 쪽을 택했다
+		// (사용자 결정, 2026-09-11). 되살리려면 아래 #if 0을 1로 바꾼다.
 		if (AGridTrain* Train = Cast<AGridTrain>(Hit.GetActor()))
 		{
-			if (Train->CanBoard(GetGridPawn()))
+#if 0
+			FText Refusal;
+			if (!Train->CanBoard(GetGridPawn(), &Refusal))
+			{
+				// 잡지는 않되 사유는 들고 간다. 바닥 픽으로 넘어간 뒤 누름이 처리될 때 띄운다.
+				Pick.VehicleRefusal = Refusal;
+			}
+			else
+#endif
 			{
 				Pick.Kind = FCursorPick::EKind::Vehicle;
 				Pick.Vehicle = Train;
@@ -191,12 +262,13 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 		}
 
 		// 블록은 어느 면으로든 잡힌다. 옆면이 그 뒤의 바닥을 가로막는 것은 여전하지만,
-		// 이제 그 셀은 블록을 클릭해서 갈 수 있다: 블록 픽이 FloorCell을 함께 들고 간다.
+		// 이동이 키보드로 옮겨 간 뒤로는(2026-09-11) 그 셀로 가는 데 커서가 필요 없다.
 		//
 		// --- TOP-FACE-ONLY PICK DISABLED 2026-09-08 ---
 		// 예전에는 윗면 히트만 잡기로 쳤다. 옆면 히트를 그랩으로 취급하면 그 뒤 셀을
 		// 영영 클릭할 수 없었기 때문인데, 대신 옆면을 잡으려다 폰이 걸어가 버렸다.
-		// 되살리려면 아래 #if 0을 1로 바꾸고 HandleBlockClick의 바닥 이동 분기를 지운다.
+		// 되살릴 이유는 이제 없다: 클릭은 폰을 보내지 않으므로 옆면을 잡아도 잃는 것이 없다.
+		// FloorCell은 클릭 이동과 함께 잠들어 있다(HandleBlockClick의 가드된 분기).
 		if (APuzzleBlock* Block = Cast<APuzzleBlock>(Hit.GetActor()))
 		{
 #if 0
@@ -296,6 +368,11 @@ void AGridPlayerController::OnPressed()
 
 	const FCursorPick Pick = PickUnderCursor();
 
+	// 누름은 언제나 새로운 뜻이다. 걸어가던 탑승 예약은 여기서 버린다 -- 남겨 두면 플레이어가
+	// 다른 곳을 눌러 폰을 돌려세운 뒤에도 예약이 살아남아 엉뚱한 순간에 태운다. 같은 탈것을
+	// 다시 눌렀다면 아래에서 새로 예약하며 경로를 다시 잡는다.
+	CancelPendingBoarding();
+
 	if (Pick.Kind == FCursorPick::EKind::Lever)
 	{
 		APuzzleLever* Lever = Pick.Lever.Get();
@@ -346,15 +423,12 @@ void AGridPlayerController::OnPressed()
 			return;
 		}
 
-		FText Reason;
-		if (Train->TryBoard(GridPawn, &Reason))
-		{
-			ShowFeedback(TEXT("You board the train."), FLinearColor(0.45f, 0.85f, 1.0f));
-		}
-		else
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-		}
+		// 정차역을 가리지 않고 문 앞 셀을 모은다. 클릭한 순간 열차가 터널 한가운데 있을 수도
+		// 있으므로, 폰은 "지금 서 있는 역"이 아니라 승강장 전체에서 가장 가까운 문으로 간다.
+		TArray<FIntPoint> DoorCells;
+		Train->GetApproachCells(DoorCells);
+
+		BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, DoorCells);
 		return;
 	}
 
@@ -401,8 +475,24 @@ void AGridPlayerController::OnPressed()
 
 	if (Pick.Kind == FCursorPick::EKind::Floor)
 	{
+		// 커서 아래에 열차가 있었는데 탈 수 없었다면 그 이유부터 알려 준다. 걷는 동작은
+		// 그대로다 -- 승강장 셀을 클릭하려던 것일 수도 있기 때문이다.
+		//
+		// 지금은 열차를 언제나 잡으므로 이 사유가 채워지는 일이 없다. PickUnderCursor의
+		// TRAIN PICK GATED BY CanBoard 블록을 되살리면 다시 살아난다(2026-09-11).
+		if (!Pick.VehicleRefusal.IsEmpty())
+		{
+			ShowFeedback(Pick.VehicleRefusal.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+
+		// --- CLICK-TO-MOVE DISABLED 2026-09-11 (WASD) ---
+		// 이동은 이제 키보드가 맡는다(2절). 클릭에는 "저것을 조작하겠다"는 뜻만 남으므로 빈
+		// 바닥을 누르는 것은 아무 뜻도 아니다. 코드를 지우지 않는 이유는 되돌릴 수 있어야
+		// 하기 때문이다: 이 마커를 찾아 가드를 걷어 내면 클릭 이동이 그대로 돌아온다.
+#if 0
 		// 바닥에는 끌 것이 없으므로 누르는 즉시 처리한다. 뗄 때까지 기다리면 응답만 늦다.
 		MovePawnToCell(Pick.Cell);
+#endif
 		return;
 	}
 
@@ -431,6 +521,227 @@ void AGridPlayerController::MovePawnToCell(const FIntPoint& Cell)
 	}
 
 	GridPawn->RequestMoveToCell(Cell);
+}
+
+// ---------------------------------------------------------------------------- 예약 탑승
+
+bool AGridPlayerController::RequestElevatorBoarding(APuzzleElevatorBlock* Elevator)
+{
+	if (!Elevator)
+	{
+		return false;
+	}
+
+	// 층을 옮기는 것은 차체가 아니라 그 아래의 구조물이다. 구조물 위가 아니면 차체는
+	// 그냥 밀 수 있는 상자이며, 그 사실을 누른 자리에서 바로 알려 준다.
+	UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+	APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
+
+	if (!Dock)
+	{
+		ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	// 탈 수 없는 엘리베이터라면 폰을 문 앞까지 걸어 보내 놓고 거기서 거절하는 것보다,
+	// 누른 자리에서 곧바로 이유를 알려 주는 편이 낫다.
+	FText Reason;
+	if (!Dock->CanLaunch(&Reason))
+	{
+		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	// 이 층에서 실제로 탈 수 있는 문 앞 셀만 후보로 삼는다. 샤프트에 걸린 차체는 한쪽
+	// 문이 선로나 다른 층을 향하고 있어, 그쪽으로 폰을 보내면 영영 닿지 못한다.
+	TArray<FIntPoint> DoorCells;
+	Elevator->GetBoardableDoorCells(DoorCells);
+
+	return BeginPendingBoarding(FPendingBoarding::EKind::Elevator, Elevator, DoorCells);
+}
+
+bool AGridPlayerController::BeginPendingBoarding(
+	FPendingBoarding::EKind Kind, AActor* Target, const TArray<FIntPoint>& DoorCells)
+{
+	AGridActor* Grid = GetGrid();
+	AGridPawn* GridPawn = GetGridPawn();
+
+	if (!Grid || !GridPawn || !Target || Kind == FPendingBoarding::EKind::None)
+	{
+		return false;
+	}
+
+	if (DoorCells.IsEmpty())
+	{
+		ShowFeedback(TEXT("There is no door to walk to from this floor."), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	// 직선 거리가 아니라 경로 길이로 고른다. 벽 하나를 사이에 둔 코앞의 문을 고르면 폰이
+	// 역을 한 바퀴 돌아 그리로 간다.
+	FIntPoint DoorCell;
+	if (!Grid->FindNearestReachableCell(GridPawn->GetCurrentCell(), DoorCells, GridPawn, DoorCell))
+	{
+		ShowFeedback(TEXT("There is no way to reach a door from here."), FLinearColor(1.0f, 0.65f, 0.05f));
+		return false;
+	}
+
+	Pending = FPendingBoarding();
+	Pending.Kind = Kind;
+	Pending.Target = Target;
+	Pending.DoorCell = DoorCell;
+
+	// 이미 문 앞에 서 있으면 걸을 것이 없다. 한 프레임도 기다리지 않고 그 자리에서 태운다.
+	if (GridPawn->GetCurrentCell() == DoorCell && !GridPawn->IsMoving())
+	{
+		TryCompleteBoarding();
+		return true;
+	}
+
+	GridPawn->RequestMoveToCell(DoorCell);
+
+	// 길찾기가 남긴 "Moving to (x,y)"를 덮는다. 지금 중요한 것은 몇 걸음인지가 아니라
+	// 폰이 왜 걸어가는지다.
+	ShowFeedback(
+		FString::Printf(TEXT("Walking to the door at (%d,%d)."), DoorCell.X, DoorCell.Y),
+		FLinearColor(0.45f, 0.85f, 1.0f));
+
+	return true;
+}
+
+void AGridPlayerController::CancelPendingBoarding(const FString& Reason)
+{
+	if (Pending.Kind == FPendingBoarding::EKind::None)
+	{
+		return;
+	}
+
+	Pending = FPendingBoarding();
+
+	if (!Reason.IsEmpty())
+	{
+		ShowFeedback(Reason, FLinearColor(1.0f, 0.65f, 0.05f));
+	}
+}
+
+void AGridPlayerController::UpdatePendingBoarding()
+{
+	AGridPawn* GridPawn = GetGridPawn();
+	AActor* Target = Pending.Target.Get();
+
+	if (!GridPawn || !Target)
+	{
+		CancelPendingBoarding();
+		return;
+	}
+
+	// 폰이 그리드를 떠났다. 우리가 태운 것이라면 성공한 순간에 예약이 이미 지워졌으므로,
+	// 여기까지 왔다는 것은 다른 무언가가 폰을 데려갔다는 뜻이다.
+	if (!GridPawn->IsOnGrid())
+	{
+		CancelPendingBoarding();
+		return;
+	}
+
+	if (GridPawn->IsMoving())
+	{
+		return;
+	}
+
+	// 서 있는데 문 앞이 아니다: 도중에 길이 막혀 폰이 멈춰 섰다는 뜻이다.
+	if (GridPawn->GetCurrentCell() != Pending.DoorCell)
+	{
+		CancelPendingBoarding(TEXT("Could not reach the door."));
+		return;
+	}
+
+	TryCompleteBoarding();
+}
+
+bool AGridPlayerController::TryCompleteBoarding()
+{
+	AGridPawn* GridPawn = GetGridPawn();
+	if (!GridPawn)
+	{
+		CancelPendingBoarding();
+		return false;
+	}
+
+	if (Pending.Kind == FPendingBoarding::EKind::Elevator)
+	{
+		APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Pending.Target.Get());
+		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+		APuzzleElevatorDock* Dock = (Elevator && Subsystem) ? Subsystem->FindDockUnder(*Elevator) : nullptr;
+
+		if (!Elevator || !Dock)
+		{
+			CancelPendingBoarding(TEXT("The elevator is no longer on its dock."));
+			return false;
+		}
+
+		// 걸어오는 사이에 다른 조각이 아직 정리되는 중일 수 있다. 그동안은 기다린다.
+		if (Elevator->IsAnimating() || Dock->IsBusy())
+		{
+			return false;
+		}
+
+		// 차체에게 먼저 태워 달라고 한다. 문 앞에 섰다는 마지막 확인이자, 블루프린트가
+		// 연출을 매다는 OnBoarded 이벤트가 나가는 자리다.
+		FText Reason;
+		if (!Elevator->TryBoard(GridPawn, &Reason))
+		{
+			CancelPendingBoarding(Reason.ToString());
+			return false;
+		}
+
+		if (!Dock->TryLaunch(GridPawn, &Reason))
+		{
+			CancelPendingBoarding(Reason.ToString());
+			return false;
+		}
+
+		Pending = FPendingBoarding();
+		ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
+		return true;
+	}
+
+	if (Pending.Kind == FPendingBoarding::EKind::Train)
+	{
+		AGridTrain* Train = Cast<AGridTrain>(Pending.Target.Get());
+		if (!Train)
+		{
+			CancelPendingBoarding();
+			return false;
+		}
+
+		FText Reason;
+		if (!Train->CanBoard(GridPawn, &Reason))
+		{
+			// 열차는 기다리면 온다. 문이 닫혀 있든 아직 터널에 있든 예약은 살려 두고, 왜
+			// 아직 못 타는지는 한 번만 알린다 -- 매 프레임 같은 줄을 다시 쓰면 그사이에
+			// 일어난 다른 안내를 전부 덮어 버린다.
+			if (!Pending.bWaitReported)
+			{
+				Pending.bWaitReported = true;
+				ShowFeedback(
+					FString::Printf(TEXT("Waiting at the door. %s"), *Reason.ToString()),
+					FLinearColor::White);
+			}
+			return false;
+		}
+
+		if (!Train->TryBoard(GridPawn, &Reason))
+		{
+			CancelPendingBoarding(Reason.ToString());
+			return false;
+		}
+
+		Pending = FPendingBoarding();
+		ShowFeedback(TEXT("You board the train."), FLinearColor(0.45f, 0.85f, 1.0f));
+		return true;
+	}
+
+	return false;
 }
 
 void AGridPlayerController::OnReleased()
@@ -502,7 +813,6 @@ void AGridPlayerController::BeginBlockDrag(const FCursorPick& Pick)
 	// 문턱을 넘느라 움직인 몇 픽셀만큼 블록이 손에서 미끄러지지 않는다.
 	DraggedBlock = Block;
 	GrabPoint = Pick.HitLocation;
-	GrabOffset = Pick.HitLocation - Block->GetActorLocation();
 	DragAxis = Block->GetWorldMoveAxis();
 	bHasRefusedDir = false;
 	StepsThisDrag = 0;
@@ -521,35 +831,14 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 	// 것을 뒤쪽 바닥으로 걸어가라는 뜻으로 읽을 수는 없다.
 	if (APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
 	{
-		FText Reason;
-		if (!Elevator->TryBoard(GetGridPawn(), &Reason))
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		// 탑승은 문 앞에 섰다는 확인일 뿐이다. 실제로 층을 옮기는 것은 차체 아래의 구조물이며,
-		// 구조물 위가 아니면 차체는 그냥 밀 수 있는 상자다.
-		UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
-		APuzzleElevatorDock* Dock = Subsystem ? Subsystem->FindDockUnder(*Elevator) : nullptr;
-
-		if (!Dock)
-		{
-			ShowFeedback(TEXT("Push the elevator onto its dock first."), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
-
-		if (Dock->TryLaunch(GetGridPawn(), &Reason))
-		{
-			ShowFeedback(TEXT("You step into the elevator."), FLinearColor(0.45f, 0.85f, 1.0f));
-		}
-		else
-		{
-			ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
-		}
+		RequestElevatorBoarding(Elevator);
 		return;
 	}
 
+	// --- CLICK-TO-MOVE DISABLED 2026-09-11 (WASD) ---
+	// 블록 위의 클릭이 그 뒤 바닥으로 걸어가라는 뜻이었던 것도 같은 이유로 꺼 둔다. 이제
+	// 블록을 눌렀다 그냥 떼는 것은 밀려던 손이 미끄러진 것이므로, 미는 법을 알려 준다.
+#if 0
 	// 그 밖의 블록 위 클릭은 그 블록이 없는 셈 치고 폰을 보낸다. 블록이 선 셀 자체를
 	// 클릭한 것이라면 기존 "Blocked by object" 거부가 그대로 나온다.
 	if (Pick.bHasFloorCell)
@@ -557,8 +846,120 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 		MovePawnToCell(Pick.FloorCell);
 		return;
 	}
+#endif
 
-	ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
+	ShowFeedback(TEXT("Drag a block to push it."), FLinearColor::White);
+}
+
+// ---------------------------------------------------------------------------- 키보드 이동
+
+void AGridPlayerController::OnMoveKeyPressed(EScreenMoveDir Dir)
+{
+	// 마지막에 누른 키가 이긴다. 이미 목록에 있더라도(키 반복 등) 맨 뒤로 옮긴다.
+	HeldMoveKeys.Remove(Dir);
+	HeldMoveKeys.Add(Dir);
+
+	// 이동 키를 누른 것은 마우스를 누른 것과 같은 뜻이다: 플레이어가 조작을 도로 가져갔으므로,
+	// 걸어가서 타기로 한 예약은 여기서 버린다. 남겨 두면 다른 데로 걸어간 뒤에도 예약이
+	// 살아남아 엉뚱한 순간에 태운다.
+	CancelPendingBoarding();
+
+	// 조각이 정리되는 동안에는 걷지 않는다. 키는 눌린 채로 두므로 정리되는 즉시 이어 걷는다.
+	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		if (Subsystem->IsInputLocked())
+		{
+			ShowFeedback(TEXT("Wait for the pieces to settle."), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+	}
+}
+
+void AGridPlayerController::OnMoveKeyReleased(EScreenMoveDir Dir)
+{
+	HeldMoveKeys.Remove(Dir);
+}
+
+bool AGridPlayerController::IsMoveKeyDown(EScreenMoveDir Dir) const
+{
+	for (const FMoveKeyBinding& Binding : GetMoveKeyBindings())
+	{
+		if (Binding.Dir != Dir)
+		{
+			continue;
+		}
+
+		for (const FKey& Key : Binding.Keys)
+		{
+			if (IsInputKeyDown(Key))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	return false;
+}
+
+EGridDirection AGridPlayerController::ScreenDirToGridDir(EScreenMoveDir Dir) const
+{
+	double Yaw = KeyboardYawOffset;
+	if (PlayerCameraManager)
+	{
+		Yaw += PlayerCameraManager->GetCameraRotation().Yaw;
+	}
+
+	// 화면 위쪽이 기준이고 나머지는 시계 방향으로 90도씩이다. 카메라 yaw가 양수 방향으로
+	// 돌면 화면에서도 시계 방향으로 도는 값이므로 그냥 더하면 된다.
+	switch (Dir)
+	{
+	case EScreenMoveDir::Right:	Yaw += 90.0;	break;
+	case EScreenMoveDir::Down:	Yaw += 180.0;	break;
+	case EScreenMoveDir::Left:	Yaw += 270.0;	break;
+	default:									break;
+	}
+
+	// 어느 셀 축에 더 가까운지로 스냅한다. 아이소메트릭에서 두 축이 정확히 비기는 각도는
+	// KeyboardYawOffset이 이미 비켜 놓았으므로, 여기서는 우세한 축이 언제나 분명하다.
+	const FVector World = FRotator(0.0, Yaw, 0.0).Vector();
+
+	if (FMath::Abs(World.X) >= FMath::Abs(World.Y))
+	{
+		return (World.X >= 0.0) ? EGridDirection::East : EGridDirection::West;
+	}
+
+	return (World.Y >= 0.0) ? EGridDirection::North : EGridDirection::South;
+}
+
+void AGridPlayerController::UpdateKeyboardMove()
+{
+	AGridPawn* GridPawn = GetGridPawn();
+	if (!GridPawn)
+	{
+		return;
+	}
+
+	// 창이 포커스를 잃으면 뗌 이벤트가 유실될 수 있다. 매 틱 실제 키 상태로 걸러 두지 않으면
+	// 아무도 누르지 않은 방향으로 폰이 혼자 계속 걸어간다.
+	HeldMoveKeys.RemoveAll([this](EScreenMoveDir Dir) { return !IsMoveKeyDown(Dir); });
+
+	if (HeldMoveKeys.IsEmpty())
+	{
+		GridPawn->SetHeldDirection(TOptional<EGridDirection>());
+		return;
+	}
+
+	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		if (Subsystem->IsInputLocked())
+		{
+			GridPawn->SetHeldDirection(TOptional<EGridDirection>());
+			return;
+		}
+	}
+
+	GridPawn->SetHeldDirection(ScreenDirToGridDir(HeldMoveKeys.Last()));
 }
 
 // ---------------------------------------------------------------------------- 레버 드래그
@@ -602,9 +1003,14 @@ void AGridPlayerController::UpdateLeverDrag()
 	LeverSweptAngle += FMath::FindDeltaAngleDegrees(LeverLastAngle, Angle);
 	LeverLastAngle = Angle;
 
-	// 휠은 커서가 어느 쪽으로 가든 따라간다. 화면 시계 방향은 쓸어 돈 각도로는 음수이고
-	// 월드에서는 양의 yaw이므로 부호를 뒤집는다.
-	Lever->SetWheelPreviewAngle(static_cast<float>(-LeverSweptAngle));
+	// 화면 시계 방향은 쓸어 돈 각도로는 음수이고 월드에서는 양의 yaw이므로 부호를 뒤집는다.
+	// 카메라가 yaw 45도를 보고 있어 양의 월드 yaw는 화면에서도 시계 방향으로 보이므로, 커서를
+	// 시계 방향으로 돌리는 것은 양의 회전을 요청하는 것이다.
+	const int32 SweptSign = (LeverSweptAngle < 0.0) ? 1 : -1;
+
+	// 휠은 커서를 따라가되, 레버가 받지 않는 방향으로는 따라 돌지 않는다. 임계값까지 돌렸다가
+	// 거부당하는 것보다, 움직이지 않는 휠이 이쪽은 막혔다고 먼저 알려 주는 편이 친절하다.
+	Lever->SetWheelPreviewAngle(Lever->AllowsTurn(SweptSign) ? static_cast<float>(-LeverSweptAngle) : 0.0f);
 
 	if (bLeverTurnSpent)
 	{
@@ -618,12 +1024,8 @@ void AGridPlayerController::UpdateLeverDrag()
 
 	bLeverTurnSpent = true;
 
-	// 카메라는 yaw 45도 방향을 보고 있어, 양의 월드 yaw가 화면에서는 시계 방향으로 보인다.
-	// 따라서 커서를 시계 방향으로 돌리면 양의 회전을 요청하는 것이다.
-	const int32 TurnSign = (LeverSweptAngle < 0.0) ? 1 : -1;
-
 	FText Reason;
-	if (!Lever->TryTurn(TurnSign, GetGridPawn(), &Reason))
+	if (!Lever->TryTurn(SweptSign, GetGridPawn(), &Reason))
 	{
 		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
 	}
@@ -645,7 +1047,19 @@ void AGridPlayerController::FinishLeverDrag()
 
 	if (!bLeverTurnSpent)
 	{
-		ShowFeedback(TEXT("Drag around the wheel to turn it a quarter."), FLinearColor::White);
+		// 방향이 고정된 휠이라면 그것까지 알려 준다. 그렇지 않으면 막힌 쪽으로 계속 돌려 보면서
+		// 드래그가 짧아서 안 되는 것으로 오해하기 쉽다.
+		if (Lever->Direction == EPuzzleRotationDirection::Free)
+		{
+			ShowFeedback(TEXT("Drag around the wheel to turn it a quarter."), FLinearColor::White);
+		}
+		else
+		{
+			ShowFeedback(
+				FString::Printf(TEXT("Drag %s around the wheel to turn it a quarter."),
+					LTTSPuzzle::DescribeTurnSign(LTTSPuzzle::ResolveTurnSign(Lever->Direction, 1))),
+				FLinearColor::White);
+		}
 	}
 
 	LeverSweptAngle = 0.0;
@@ -671,15 +1085,11 @@ void AGridPlayerController::UpdateDrag()
 		return;
 	}
 
-	if (Block->IsAnimating())
-	{
-		return;		// 한 번에 한 셀; 스텝이 끝나기를 기다린다
-	}
-
-	// 드래그 한 번에 이동 한 번. 블록은 계속 쥔 상태로 두되, 플레이어가 놓았다가 다시
-	// 잡기 전까지는 더 시도하지 않는다.
+	// 드래그 한 번에 이동 한 번(bOneStepPerDrag를 켠 조각의 회귀 동작). 블록은 계속 쥔
+	// 상태로 두되, 플레이어가 놓았다가 다시 잡기 전까지는 더 시도하지 않는다.
 	if (Block->bOneStepPerDrag && StepsThisDrag >= 1)
 	{
+		Block->SetHeldSlideDirection(TOptional<EGridDirection>());
 		return;
 	}
 
@@ -702,13 +1112,12 @@ void AGridPlayerController::UpdateDrag()
 		WorldOrigin + WorldDirection * 100000.0,
 		FPlane(GrabPoint, FVector::UpVector));
 
-	// 드래그 시작점이 아니라 블록의 현재 위치에서 재기 때문에 자유 블록을 모퉁이 너머로
-	// 끌고 갈 수 있다: 스텝마다 커서 기준으로 새로 고른다.
-	const FVector Target = Cursor - GrabOffset;
-	const FVector Current = Block->GetActorLocation();
-
-	double DeltaX = (DragAxis == EPuzzleMoveAxis::AxisY) ? 0.0 : Target.X - Current.X;
-	double DeltaY = (DragAxis == EPuzzleMoveAxis::AxisX) ? 0.0 : Target.Y - Current.Y;
+	// 블록의 현재 위치가 아니라 **잡은 지점**에서 잰다(2026-09-11). 블록 기준으로 재면
+	// 블록이 커서를 따라오면서 델타를 도로 0으로 만들어, 한 칸 갈 때마다 손을 한 칸씩 더
+	// 움직여야 했다. 이제 커서는 방향을 가리키는 조이스틱이다: 잡은 지점에서 반 칸 이상
+	// 밀어 둔 채로 있으면 그쪽으로 계속 밀리고, 반 칸 안으로 되돌리면 멈춘다.
+	double DeltaX = (DragAxis == EPuzzleMoveAxis::AxisY) ? 0.0 : Cursor.X - GrabPoint.X;
+	double DeltaY = (DragAxis == EPuzzleMoveAxis::AxisX) ? 0.0 : Cursor.Y - GrabPoint.Y;
 
 	const double Threshold = Grid->CellSize * 0.5;
 
@@ -736,18 +1145,39 @@ void AGridPlayerController::UpdateDrag()
 
 	if (NumCandidates == 0)
 	{
-		bHasRefusedDir = false;		// 커서가 반 셀 안으로 돌아왔다; 메시지를 다시 준비한다
+		// 커서가 잡은 지점 둘레 반 칸 안으로 돌아왔다. 가고 있던 칸까지만 가고 선다.
+		Block->SetHeldSlideDirection(TOptional<EGridDirection>());
+		bHasRefusedDir = false;		// 메시지를 다시 준비한다
 		return;
 	}
 
+	// 지금 이어 갈 수 있는 방향을 고른다.
+	//
+	// 슬라이드 중에도 MinCell은 이미 목적지 칸이므로, CanSlide는 "도착한 뒤에 그쪽으로 더
+	// 갈 수 있는가"에 답한다. 덕분에 주축이 막혀 벽을 따라 미끄러지는 동안에도 이음이
+	// 끊기지 않고, 커서를 반대로 넘기면 다음 칸에서 방향이 바뀐다.
+	TOptional<EGridDirection> HeldDir;
 	for (int32 Index = 0; Index < NumCandidates; ++Index)
 	{
-		if (Block->StartSlide(Candidates[Index]))
+		if (Block->CanSlide(Candidates[Index]))
 		{
-			++StepsThisDrag;
-			bHasRefusedDir = false;
-			return;
+			HeldDir = Candidates[Index];
+			break;
 		}
+	}
+
+	Block->SetHeldSlideDirection(HeldDir);
+
+	if (Block->IsAnimating())
+	{
+		return;		// 가고 있다. 도착하면 블록이 자기 Tick에서 다음 칸을 이어 붙인다.
+	}
+
+	if (HeldDir.IsSet() && Block->StartSlide(HeldDir.GetValue()))
+	{
+		++StepsThisDrag;
+		bHasRefusedDir = false;
+		return;
 	}
 
 	// 아무것도 움직이지 않았다. 플레이어가 실제로 끌던 방향을 보고한다.
@@ -776,8 +1206,10 @@ void AGridPlayerController::FinishDrag()
 	StepsThisDrag = 0;
 	bHasRefusedDir = false;
 	DragAxis = EPuzzleMoveAxis::None;
-	GrabOffset = FVector::ZeroVector;
 
+	// 이어 밀 방향부터 지운다. SetHeld(false)도 지우지만, 이미 놓인 블록에 대해서는 일찍
+	// 빠져나가므로 여기서 한 번 더 분명히 해 둔다.
+	Block->SetHeldSlideDirection(TOptional<EGridDirection>());
 	Block->SetHeld(false);
 
 	if (Steps > 0)
@@ -790,6 +1222,14 @@ void AGridPlayerController::FinishDrag()
 	if (Block->IsA<APuzzleRotatingObstacle>())
 	{
 		ShowFeedback(TEXT("This turns only when its lever is turned."), FLinearColor::White);
+		return;
+	}
+
+	// 저작에서 고정해 둔 물건. 축 문구("moves nowhere")는 규칙을 설명하지 못하므로 먼저
+	// 가로챈다 -- 플레이어가 알아야 하는 것은 "이 벤치는 붙박이다"이지 축이 아니다.
+	if (!Block->bCanMove)
+	{
+		ShowFeedback(TEXT("This object is fixed in place."), FLinearColor::White);
 		return;
 	}
 
@@ -814,6 +1254,14 @@ void AGridPlayerController::FinishDrag()
 
 FString AGridPlayerController::GetDragStatusText() const
 {
+	if (HasPendingBoarding())
+	{
+		return FString::Printf(TEXT("Boarding %s via cell (%d,%d)%s"),
+			*GetNameSafe(Pending.Target.Get()),
+			Pending.DoorCell.X, Pending.DoorCell.Y,
+			Pending.bWaitReported ? TEXT(", waiting") : TEXT(""));
+	}
+
 	if (const APuzzleLever* Lever = DraggedLever.Get())
 	{
 		return FString::Printf(TEXT("Turning %s (%.0f deg%s)"),
@@ -826,7 +1274,9 @@ FString AGridPlayerController::GetDragStatusText() const
 		return FString();
 	}
 
-	return FString::Printf(TEXT("Holding %s (%d step(s))"), *Block->GetName(), StepsThisDrag);
+	// 블록이 자기 Tick에서 이어 붙인 걸음까지 세려면 블록에게 물어야 한다. StepsThisDrag는
+	// 컨트롤러가 직접 시작한 첫 걸음만 센다.
+	return FString::Printf(TEXT("Holding %s (%d step(s))"), *Block->GetName(), Block->GetStepsWhileHeld());
 }
 
 void AGridPlayerController::PlayerTick(float DeltaTime)
@@ -854,6 +1304,8 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 		UpdatePendingPress();
 	}
 
+	UpdateKeyboardMove();
+
 	if (DraggedLever.IsValid())
 	{
 		UpdateLeverDrag();
@@ -862,6 +1314,11 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 	if (DraggedBlock.IsValid())
 	{
 		UpdateDrag();
+	}
+
+	if (HasPendingBoarding())
+	{
+		UpdatePendingBoarding();
 	}
 
 	UpdateHover();
@@ -916,6 +1373,17 @@ void AGridPlayerController::UpdateHover()
 			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
 		}
 	}
+	else if (Pick.Kind == FCursorPick::EKind::Vehicle)
+	{
+		if (const AGridTrain* Train = Pick.Vehicle.Get())
+		{
+			// 차체가 아니라 탈 수 있는 자리를 그린다. 레버와 같은 생각이다: 누르기 전에
+			// 플레이어가 알아야 하는 것은 폰이 어디로 걸어갈 것인가다.
+			TArray<FIntPoint> Cells;
+			Train->GetApproachCells(Cells);
+			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
+		}
+	}
 	else if (Pick.Kind == FCursorPick::EKind::Block)
 	{
 		if (const APuzzleBlock* Block = Pick.Block.Get())
@@ -924,6 +1392,16 @@ void AGridPlayerController::UpdateHover()
 			// 잡으려는 건지 볼 수 있게 한다.
 			TArray<FIntPoint> Cells;
 			Block->GatherOccupiedCells(Cells);
+
+			// 엘리베이터는 밀 수도 있고 탈 수도 있다. 탈 수 있는 문 앞 셀까지 함께 그려서
+			// 클릭이 폰을 어디로 보낼지 보이게 한다.
+			if (const APuzzleElevatorBlock* Elevator = Cast<APuzzleElevatorBlock>(Block))
+			{
+				TArray<FIntPoint> DoorCells;
+				Elevator->GetBoardableDoorCells(DoorCells);
+				Cells.Append(DoorCells);
+			}
+
 			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
 		}
 	}

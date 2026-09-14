@@ -129,11 +129,6 @@ protected:
 
 private:
 
-	/**
-	 * 저작된 풋프린트의 셀이, 지금까지 돈 90도 회전 횟수를 반영해 그리드 위에 놓인 풋프린트
-	 * 안에서 어디에 해당하는지 구한다.
-	 */
-	FIntPoint LocalToWorldOffset(FIntPoint Local) const;
 
 	/**
 	 * 움직이는 부분이 돌면서 지나가는 셀들(회전 경로 셀).

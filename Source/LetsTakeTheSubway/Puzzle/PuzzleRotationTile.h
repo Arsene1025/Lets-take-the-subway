@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Puzzle/PuzzleFloorTile.h"
+#include "Puzzle/PuzzleTypes.h"
 #include "PuzzleRotationTile.generated.h"
 
 class APuzzleBlock;
@@ -28,9 +29,15 @@ class LETSTAKETHESUBWAY_API APuzzleRotationTile : public APuzzleFloorTile
 public:
 	APuzzleRotationTile();
 
-	/** 위에서 본 회전 방향. 시계 방향이 디자인 문서의 도해와 일치한다. */
+	/**
+	 * 위에서 본 회전 방향. 시계 방향이 디자인 문서의 도해와 일치한다.
+	 *
+	 * Free는 번갈아 돌린다는 뜻이다: 발동할 때마다 시계, 반시계, 다시 시계 순서로 바뀐다.
+	 * 타일은 블록이 올라오면 저혼자 도는 장치라 플레이어가 방향을 고를 입력이 없으므로, 무작위보다
+	 * 예측할 수 있는 교대가 푸는 대상이 된다. 거부된 회전은 순서를 소모하지 않는다.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile")
-	bool bClockwise = true;
+	EPuzzleRotationDirection Direction = EPuzzleRotationDirection::Clockwise;
 
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile", meta = (ClampMin = 0.05))
 	float RotateDuration = 0.4f;
@@ -52,14 +59,30 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 
+	virtual void PostLoad() override;
+
 protected:
 	virtual void RefreshVisual() override;
 	virtual FString DescribeTile() const override;
+	virtual void OnTileReady() override;
 
 private:
 	/** 한쪽 모서리에 놓여, 레벨에서 회전 방향이 한눈에 읽히게 한다. */
 	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
 	TObjectPtr<UStaticMeshComponent> CornerMesh;
+
+	/** 이번 발동에 쓸 TurnSign. Free가 아니면 설정된 방향이 그대로 나온다. */
+	int32 ResolveTurnSign() const;
+
+	/** Free일 때 다음에 돌 방향. 직렬화하지 않는다: 한 플레이 안에서만 의미가 있다. */
+	int32 NextFreeTurnSign = 1;
+
+	/**
+	 * 구버전의 bool. 직렬화된 값을 PostLoad에서 Direction으로 옮기기 위해서만 남아 있다.
+	 * 에디터에는 노출되지 않으며 새 코드는 이 값을 읽지 않는다.
+	 */
+	UPROPERTY()
+	bool bClockwise_DEPRECATED = true;
 
 	bool bRotating = false;
 	float RotationElapsed = 0.0f;

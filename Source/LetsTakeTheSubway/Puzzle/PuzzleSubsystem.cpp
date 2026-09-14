@@ -146,6 +146,20 @@ APuzzleRegion* UPuzzleSubsystem::FindRegionContaining(const FGridRect& Rect) con
 	return nullptr;
 }
 
+bool UPuzzleSubsystem::IsDockCell(FIntPoint Cell) const
+{
+	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
+	{
+		const APuzzleElevatorDock* Dock = Cast<APuzzleElevatorDock>(Entry.Get());
+		if (Dock && !Dock->IsDisabled() && Dock->GetRegion().Contains(Cell))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 APuzzleElevatorDock* UPuzzleSubsystem::FindDockUnder(const APuzzleElevatorBlock& Elevator) const
 {
 	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)

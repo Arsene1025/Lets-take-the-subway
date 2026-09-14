@@ -13,6 +13,7 @@ class AGridEscalator;
 class AGridPawn;
 class AGridTrain;
 class APuzzleBlock;
+class APuzzleElevatorBlock;
 class APuzzleLever;
 class UInputAction;
 class UInputMappingContext;
@@ -67,18 +68,84 @@ struct FCursorPick
 
 	/** 블록 뒤에서 바닥을 찾지 못했다면(그리드 밖 등) FloorCell은 의미가 없다. */
 	bool bHasFloorCell = false;
+
+	/**
+	 * 커서 아래에 열차가 있었지만 지금 탈 수 없을 때, 그 이유.
+	 *
+	 * 열차는 탈 수 있을 때만 잡히므로 거부 사유가 화면에 닿을 길이 없었다. 문 앞에서
+	 * 눌러도 폰이 그냥 뒤쪽 바닥으로 걸어가고 왜 안 탔는지 알 수 없었다. 픽을 바꾸지
+	 * 않고(차체가 승강장 셀을 가리므로 그 규칙은 옳다) 사유만 함께 들고 나온다.
+	 */
+	FText VehicleRefusal;
 };
 
 /**
- * 셀을 클릭하면 그리로 이동하고, 퍼즐 블록을 누른 채 드래그하면 민다.
+ * 눌러 둔 탈것과, 그것을 타려고 걸어가는 문 앞 셀.
  *
- * 마우스 버튼 하나가 보조 키 없이 두 역할을 다 하되, 무엇을 눌렀느냐가 아니라 **끌었느냐**로
- * 나눈다: 커서가 화면에서 DragStartThresholdPixels 이상 움직이면 드래그(블록 밀기)이고,
- * 그 전에 떼면 클릭(폰 이동)이다. 그래서 블록 위의 누름은 판정이 날 때까지 보류된다.
+ * 탑승은 원래 "문 앞 셀에 서서 클릭"이었다. 어디에 서야 하는지 화면에 아무 표시도 없어서
+ * 플레이어는 차체를 눌러 보고, 아무 일도 일어나지 않는 것을 보고, 승강장을 더듬어야 했다.
+ * 이제 클릭은 "타겠다"는 뜻이고 문 앞까지 걸어가는 것은 폰의 일이다.
+ *
+ * 예약이 컨트롤러에 사는 이유는 이것이 조작의 상태이기 때문이다. 탈것은 자기를 타려고
+ * 누가 걸어오고 있는지 알 필요가 없고, 폰은 자기가 왜 그 셀로 가는지 알 필요가 없다.
+ */
+struct FPendingBoarding
+{
+	enum class EKind : uint8
+	{
+		None,
+		Elevator,
+		Train
+	};
+
+	EKind Kind = EKind::None;
+
+	/** APuzzleElevatorBlock 또는 AGridTrain. */
+	TWeakObjectPtr<AActor> Target;
+
+	/** 걸어가고 있는(또는 이미 서 있는) 문 앞 셀. */
+	FIntPoint DoorCell = FIntPoint::ZeroValue;
+
+	/** 기다리는 이유를 이미 한 번 알렸는지. 매 프레임 같은 줄을 다시 쓰지 않기 위해서다. */
+	bool bWaitReported = false;
+};
+
+/**
+ * 이동 키가 향하는 화면 기준 방향.
+ *
+ * 셀 축이 아니라 화면 축인 이유는 카메라가 아이소메트릭이기 때문이다: 월드의 X·Y축은
+ * 화면에서 대각선으로 놓이므로 "W가 어느 셀 축인가"는 카메라 yaw에 달려 있다. 키는
+ * 플레이어가 보는 방향에 고정하고, 셀 축으로의 환산은 ScreenDirToGridDir이 매 입력마다
+ * 다시 한다. 그래서 카메라 각도를 바꿔도 조작이 따라온다.
+ */
+enum class EScreenMoveDir : uint8
+{
+	Up,
+	Right,
+	Down,
+	Left,
+
+	Num
+};
+
+/** 이동 키 방향의 개수. UHT는 배열 크기를 직접 읽으므로 리터럴로 둔다. */
+static constexpr int32 NumScreenMoveDirs = 4;
+static_assert(static_cast<int32>(EScreenMoveDir::Num) == NumScreenMoveDirs, "Keep NumScreenMoveDirs in step with EScreenMoveDir.");
+
+/**
+ * WASD로 그리드를 한 칸씩 걷고, 퍼즐 블록을 누른 채 드래그하면 민다.
+ *
+ * 이동은 키보드, 조작 대상은 마우스로 나뉘어 있다(2026-09-11). 마우스 왼쪽 버튼은 여전히
+ * 무엇을 눌렀느냐가 아니라 **끌었느냐**로 나뉜다: 커서가 화면에서 DragStartThresholdPixels
+ * 이상 움직이면 드래그(블록 밀기)이고, 그 전에 떼면 클릭(탈것 탑승)이다. 그래서 블록 위의
+ * 누름은 판정이 날 때까지 보류된다.
+ *
+ * 두 제스처 모두 **누르고 있는 동안 계속**이다. 이동 키를 누르고 있으면 폰이 막힐 때까지
+ * 정속으로 걷고, 커서를 잡은 지점에서 반 칸 이상 밀어 둔 채로 있으면 블록도 막힐 때까지
+ * 정속으로 밀린다. 이어 붙이는 일은 폰과 블록이 각자의 Tick에서 한다.
  *
  * 블록은 어느 면으로든 잡힌다. 카메라가 가파른 각도로 내려다보므로 블록의 옆면은 커서와
- * 그 뒤 바닥 셀 사이를 가로막지만, 그 셀은 이제 블록을 클릭해서 갈 수 있다: 블록 픽은
- * 블록을 무시하고 다시 트레이스한 FloorCell을 함께 들고 다닌다.
+ * 그 뒤 바닥 셀 사이를 가로막지만, 그 셀로 걸어가는 데에는 이제 커서가 필요 없다.
  *
  * 입력 오브젝트는 C++에서 만들므로 IA_/IMC_ 애셋은 없다.
  */
@@ -107,6 +174,16 @@ public:
 	/** 커서가 무엇 위에 있는지: 블록, 레버, 열차, 바닥 셀, 또는 아무것도 없음. */
 	FCursorPick PickUnderCursor() const;
 
+	/**
+	 * "저 엘리베이터를 타겠다"는 요청. 차체를 클릭하는 것과 같은 뜻이다.
+	 *
+	 * 클릭 경로와 콘솔 명령(ltts.ElevatorRide)이 이 하나를 공유한다. 시험용 경로가 실제
+	 * 경로와 갈라지면 시험이 증명하는 것이 없어진다.
+	 *
+	 * @return 폰이 문 앞으로 출발했거나 그 자리에서 탔으면 true. 거절 사유는 화면에 띄운다.
+	 */
+	bool RequestElevatorBoarding(APuzzleElevatorBlock* Elevator);
+
 	bool IsDraggingBlock() const { return DraggedBlock.IsValid(); }
 
 	bool IsDraggingLever() const { return DraggedLever.IsValid(); }
@@ -123,9 +200,33 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (ClampMin = "0.0"))
 	float DragStartThresholdPixels = 8.0f;
 
+	/**
+	 * 카메라 yaw에 더해 W가 향할 월드 방향을 정하는 각도 (도).
+	 *
+	 * 카메라 정면을 그대로 쓰면 아이소메트릭 각에서 두 축이 정확히 비겨 W가 어느 쪽으로도
+	 * 읽힐 수 있다. -45도는 그 대각선을 한 축으로 돌려 세워, yaw -135도 카메라에서 W가
+	 * 화면 왼쪽 위(서쪽)를 향하게 한다. 카메라 각도를 바꾸면 이 값으로 다시 맞춘다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	float KeyboardYawOffset = -45.0f;
+
 private:
 	void OnPressed();
 	void OnReleased();
+
+	// ---------------------------------------------------------------- 키보드 이동
+
+	void OnMoveKeyPressed(EScreenMoveDir Dir);
+	void OnMoveKeyReleased(EScreenMoveDir Dir);
+
+	/** 이 화면 방향에 묶인 키가 하나라도 실제로 눌려 있는지. 놓친 뗌 이벤트를 걸러낸다. */
+	bool IsMoveKeyDown(EScreenMoveDir Dir) const;
+
+	/** 화면 기준 방향을 지금 카메라에서의 셀 축으로 환산한다. */
+	EGridDirection ScreenDirToGridDir(EScreenMoveDir Dir) const;
+
+	/** 눌려 있는 이동 키를 폰에게 전달한다. 매 틱 돈다. */
+	void UpdateKeyboardMove();
 
 	/** 모든 블록을 무시하고 커서 아래 바닥 셀을 구한다. 바닥 판정의 유일한 규칙이다. */
 	bool TraceFloorIgnoringBlocks(
@@ -146,6 +247,27 @@ private:
 
 	/** 바닥 셀 하나로 가라는 명령. 막힌 옆 칸이면 부딪히는 연출을 먼저 낸다. */
 	void MovePawnToCell(const FIntPoint& Cell);
+
+	// ---------------------------------------------------------------- 예약 탑승
+
+	/**
+	 * 탈것을 타기로 한다. 가장 가까운 문 앞으로 걸어가고, 닿으면 자동으로 탄다.
+	 *
+	 * 이미 문 앞에 서 있으면 한 프레임도 기다리지 않고 그 자리에서 태운다 -- 예전처럼
+	 * 문 앞에서 누른 플레이어에게는 아무것도 달라지지 않아야 한다.
+	 */
+	bool BeginPendingBoarding(FPendingBoarding::EKind Kind, AActor* Target, const TArray<FIntPoint>& DoorCells);
+
+	/** 예약을 버린다. 걷고 있던 폰은 가던 길을 그대로 간다. */
+	void CancelPendingBoarding(const FString& Reason = FString());
+
+	/** 폰이 문 앞에 닿았는지 보고, 닿았으면 태운다. 매 틱 돈다. */
+	void UpdatePendingBoarding();
+
+	/** 지금 태울 수 있으면 태운다. 아직이면 false -- 열차는 기다리면 오므로 예약은 남는다. */
+	bool TryCompleteBoarding();
+
+	bool HasPendingBoarding() const { return Pending.Kind != FPendingBoarding::EKind::None; }
 
 	/** 커서를 따라가며 쥔 블록을 그쪽으로 한 스텝씩 옮긴다. */
 	void UpdateDrag();
@@ -173,8 +295,25 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ClickAction;
 
+	/** 화면 기준 이동 액션. EScreenMoveDir로 색인한다. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MoveActions[4];
+
+	/**
+	 * 지금 눌려 있는 이동 키, 누른 순서대로.
+	 *
+	 * **마지막에 누른 키가 이긴다.** 두 키를 함께 누르면 그리드에는 없는 대각선이 되고,
+	 * 한 축을 골라 주면 방금 누른 키가 무시되어 조작이 먹히지 않은 것처럼 보인다. 나중에
+	 * 누른 쪽을 따르면 손가락을 옮겨 짚는 대로 방향이 바뀌고, 그 키를 떼면 아직 누르고
+	 * 있는 이전 키로 되돌아간다.
+	 */
+	TArray<EScreenMoveDir> HeldMoveKeys;
+
 	FString FeedbackText;
 	FLinearColor FeedbackColor = FLinearColor::White;
+
+	/** 지금 걸어가서 타기로 한 탈것. 없으면 Kind가 None이다. */
+	FPendingBoarding Pending;
 
 	FIntPoint LastHoveredCell = FIntPoint(MIN_int32, MIN_int32);
 	FCursorPick::EKind LastHoverKind = FCursorPick::EKind::None;
@@ -199,16 +338,13 @@ private:
 
 	TWeakObjectPtr<APuzzleBlock> DraggedBlock;
 
-	/** 커서가 블록의 어디를 잡았는지. 드래그 평면이 이 점을 지난다. */
-	FVector GrabPoint = FVector::ZeroVector;
-
 	/**
-	 * 블록 중심 기준의 그랩 지점.
+	 * 커서가 블록의 어디를 잡았는지. 드래그 평면이 이 점을 지나고, 드래그 방향도 이 점에서 잰다.
 	 *
-	 * 드래그 내내 일정하게 유지해서, 블록의 중심이 포인터 아래로 튀어 오지 않고 잡은
-	 * 자리 그대로 커서를 따라오게 한다.
+	 * 블록 중심 기준의 그랩 오프셋은 2026-09-11에 사라졌다. 블록이 커서를 따라다니던 시절에는
+	 * 잡은 자리를 유지하려고 필요했지만, 이제 커서는 방향만 가리키므로 오프셋이 상쇄된다.
 	 */
-	FVector GrabOffset = FVector::ZeroVector;
+	FVector GrabPoint = FVector::ZeroVector;
 
 	/** 쥔 블록이 이동할 수 있는 축. 잡을 때 한 번 읽는다. */
 	EPuzzleMoveAxis DragAxis = EPuzzleMoveAxis::None;

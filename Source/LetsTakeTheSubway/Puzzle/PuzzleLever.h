@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Puzzle/PuzzleTypes.h"
 #include "PuzzleLever.generated.h"
 
 class AGridActor;
@@ -34,6 +35,16 @@ public:
 	UPROPERTY(EditInstanceOnly, Category = "Puzzle Lever")
 	TObjectPtr<APuzzleRotatingObstacle> Target;
 
+	/**
+	 * 이 휠이 도는 방향.
+	 *
+	 * Free면 플레이어가 돌린 쪽으로 돌아간다. 한 방향으로 고정하면 반대쪽 드래그는 거부되고
+	 * 휠도 따라 돌지 않는다. 한 장애물에 시계 레버와 반시계 레버를 따로 두면, 어느 레버까지
+	 * 걸어갈 수 있느냐 자체가 퍼즐이 된다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Lever")
+	EPuzzleRotationDirection Direction = EPuzzleRotationDirection::Free;
+
 	/** 기둥 높이(cm). 휠은 그 위에 얹힌다. */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Lever", meta = (ClampMin = 10.0))
 	float PostHeight = 90.0f;
@@ -62,6 +73,12 @@ public:
 	void GetOperatingCells(TArray<FIntPoint>& OutCells) const;
 
 	bool IsPawnAdjacent(const AGridPawn* Pawn) const;
+
+	/** 이 레버가 주어진 방향의 회전을 받는지. 드래그 프리뷰도 이걸 보고 휠을 돌릴지 정한다. */
+	bool AllowsTurn(int32 TurnSign) const
+	{
+		return LTTSPuzzle::DirectionAllowsTurn(Direction, TurnSign);
+	}
 
 	// ---------------------------------------------------------------- 사용
 

@@ -29,8 +29,63 @@ enum class EPuzzleMoveAxis : uint8
 	AxisY	UMETA(DisplayName = "Y axis (north/south)")
 };
 
+/**
+ * 위에서 내려다본 회전 방향.
+ *
+ * 레버와 회전 타일이 같은 타입을 공유하되, Free가 무엇을 뜻하는지는 서로 다르다:
+ * 레버는 플레이어가 휠을 돌린 쪽으로 돌고, 회전 타일은 발동할 때마다 번갈아 돌린다. 둘 다
+ * "어느 한 방향으로 고정되지 않았다"는 점에서는 같으므로 하나의 설정 값으로 묶는다.
+ *
+ * 각도가 자유롭다는 뜻이 아니다. 회전은 여전히 90도 단위이며, 그것은 정수 셀 점유 모델이
+ * 요구하는 조건이다.
+ */
+UENUM(BlueprintType)
+enum class EPuzzleRotationDirection : uint8
+{
+	/** 항상 시계 방향(TurnSign +1). */
+	Clockwise			UMETA(DisplayName = "Clockwise"),
+
+	/** 항상 반시계 방향(TurnSign -1). */
+	CounterClockwise	UMETA(DisplayName = "Counter-clockwise"),
+
+	/** 한 방향으로 고정하지 않는다. 구체적인 의미는 사용하는 클래스가 정한다. */
+	Free				UMETA(DisplayName = "Free (either way)")
+};
+
 namespace LTTSPuzzle
 {
+	/** 부호 관례를 한군데 모아 둔다: +1이 시계 방향이다. */
+	inline const TCHAR* DescribeTurnSign(int32 TurnSign)
+	{
+		return (TurnSign >= 0) ? TEXT("clockwise") : TEXT("counter-clockwise");
+	}
+
+	/** 이 설정이 주어진 TurnSign을 허용하는지. Free는 무엇이든 받는다. */
+	inline bool DirectionAllowsTurn(EPuzzleRotationDirection Direction, int32 TurnSign)
+	{
+		switch (Direction)
+		{
+		case EPuzzleRotationDirection::Clockwise:			return TurnSign >= 0;
+		case EPuzzleRotationDirection::CounterClockwise:		return TurnSign < 0;
+		default:											return true;
+		}
+	}
+
+	/**
+	 * 고정된 방향의 TurnSign. Free에는 정답이 없으므로 FallbackSign을 그대로 돌려준다.
+	 *
+	 * 호출하는 쪽이 Free를 어떻게 해석할지(플레이어 입력, 번갈아 돌리기) 정하게 한다.
+	 */
+	inline int32 ResolveTurnSign(EPuzzleRotationDirection Direction, int32 FallbackSign)
+	{
+		switch (Direction)
+		{
+		case EPuzzleRotationDirection::Clockwise:			return 1;
+		case EPuzzleRotationDirection::CounterClockwise:		return -1;
+		default:											return (FallbackSign >= 0) ? 1 : -1;
+		}
+	}
+
 	/** 문이나 방향이 놓인 축: 북쪽을 향한 문은 남북으로 슬라이드한다. */
 	inline EPuzzleMoveAxis AxisForDirection(EGridDirection Dir)
 	{

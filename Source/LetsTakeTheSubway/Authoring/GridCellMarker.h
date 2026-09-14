@@ -38,6 +38,21 @@ public:
 		meta = (EditCondition = "CellType == EGridCellType::Conditional", EditConditionHides))
 	TObjectPtr<UGridCellRule> Rule;
 
+	/**
+	 * Rule이 비어 있을 때 대신 만들 규칙 클래스.
+	 *
+	 * Rule은 Instanced 서브오브젝트라 손으로 클래스를 고르는 것 말고는 채울 방법이 없다.
+	 * 개찰구 한 줄처럼 같은 규칙을 여러 마커에 반복해 주는 배치는 그렇게 하기에 번거롭고,
+	 * 에디터 자동화에서는 아예 불가능하다. 이 슬롯을 채우면 굽는 시점에 기본값 그대로의
+	 * 규칙 오브젝트가 만들어진다.
+	 *
+	 * Rule이 있으면 그쪽이 이긴다 -- 손으로 값을 조정한 규칙을 클래스 기본값이 덮어쓰지
+	 * 않게 하기 위해서다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Grid Override",
+		meta = (EditCondition = "CellType == EGridCellType::Conditional", EditConditionHides))
+	TSubclassOf<UGridCellRule> RuleClass;
+
 	/** 마커가 겹치면 Priority가 높은 쪽이 이긴다. */
 	UPROPERTY(EditAnywhere, Category = "Grid Override")
 	int32 Priority = 0;

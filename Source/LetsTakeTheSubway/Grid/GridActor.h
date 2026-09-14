@@ -270,6 +270,18 @@ public:
 	/** 그리드 위 A*. OutPath는 Start를 제외하고 Goal로 끝난다. */
 	bool FindPath(FIntPoint Start, FIntPoint Goal, const APawn* Pawn, TArray<FIntPoint>& OutPath) const;
 
+	/**
+	 * 후보 셀 가운데 폰이 가장 적은 걸음으로 닿을 수 있는 셀.
+	 *
+	 * 탈것의 입구는 대개 여러 칸이다(엘리베이터의 문 앞 네 칸, 열차의 문 여덟 짝). 어디로
+	 * 걸어갈지를 직선 거리로 고르면 벽 하나를 사이에 두고 코앞인 칸이 뽑혀 폰이 역을 한
+	 * 바퀴 돌게 되므로, 실제 경로 길이로 고른다.
+	 *
+	 * From이 후보에 들어 있으면 0걸음으로 그 셀을 돌려준다 -- 이미 입구에 서 있다는 뜻이다.
+	 */
+	bool FindNearestReachableCell(FIntPoint From, const TArray<FIntPoint>& Candidates,
+		const APawn* Pawn, FIntPoint& OutCell, int32* OutSteps = nullptr) const;
+
 	/** 폰이 도착하면 호출한다. StageClear 셀이면 OnStageClear를 발생시킨다. */
 	void NotifyPawnEnteredCell(APawn* Pawn, FIntPoint Cell);
 
