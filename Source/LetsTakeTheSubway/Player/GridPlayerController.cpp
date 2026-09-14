@@ -13,8 +13,11 @@
 #include "Puzzle/PuzzleLever.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Stage/StageInfo.h"
+#include "Stage/StageSubsystem.h"
 #include "Vehicle/GridTrain.h"
 
+#include "Camera/CameraActor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
 #include "EnhancedInputComponent.h"
@@ -24,6 +27,38 @@
 #include "InputAction.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
+
+namespace
+{
+	/** 화면 방향 하나와 거기에 묶인 키들. */
+	struct FMoveKeyBinding
+	{
+		EScreenMoveDir Dir;
+		const TCHAR* ActionName;
+		FKey Keys[2];
+	};
+
+	/**
+	 * 이동 키 표.
+	 *
+	 * 매핑 컨텍스트를 만들 때와, 놓친 뗌 이벤트를 걸러낼 때가 같은 표를 본다. 두 곳에 따로
+	 * 적어 두면 한쪽만 고쳤을 때 키가 영영 눌린 것으로 남아 폰이 혼자 걸어간다.
+	 *
+	 * 파일 범위 전역이 아니라 함수 안의 정적 변수인 이유는 FKey 때문이다. EKeys의 키들은
+	 * 엔진이 시작하면서 초기화하므로, 전역으로 두면 그보다 먼저 만들어질 수 있다.
+	 */
+	const TArray<FMoveKeyBinding>& GetMoveKeyBindings()
+	{
+		static const TArray<FMoveKeyBinding> Bindings = {
+			{ EScreenMoveDir::Up,    TEXT("GridMoveUp"),    { EKeys::W, EKeys::Up } },
+			{ EScreenMoveDir::Right, TEXT("GridMoveRight"), { EKeys::D, EKeys::Right } },
+			{ EScreenMoveDir::Down,  TEXT("GridMoveDown"),  { EKeys::S, EKeys::Down } },
+			{ EScreenMoveDir::Left,  TEXT("GridMoveLeft"),  { EKeys::A, EKeys::Left } },
+		};
+
+		return Bindings;
+	}
+}
 
 AGridPlayerController::AGridPlayerController()
 {
@@ -44,7 +79,129 @@ void AGridPlayerController::BeginPlay()
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
 
-	FeedbackText = TEXT("Click a cell to move. Drag a block to push it.");
+	FeedbackText = TEXT("WASD to move. Drag a block to push it.");
+
+	// 구역 카메라. 구역 변경 이벤트가 아니라 상태 이벤트를 받는 이유: 레벨 시작 판정은 구역 0이어도
+	// 반드시 한 번 오므로, 구역 카메라가 없는 맵도 여기서 한 번 확인하고 경고할 수 있다.
+	// 레벨 시작 판정은 모든 액터 BeginPlay가 끝난 뒤(UWorld::OnWorldBeginPlay)라 첫 방송을 놓치지 않는다.
+	if (UStageSubsystem* Stage = UStageSubsystem::Get(this))
+	{
+		Stage->OnStageStateChanged.AddUniqueDynamic(this, &AGridPlayerController::HandleStageStateChanged);
+		BoundStage = Stage;
+
+		if (Stage->IsResolved())
+		{
+			HandleStageStateChanged(Stage->GetState());
+		}
+	}
+}
+
+void AGridPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UStageSubsystem* Stage = BoundStage.Get())
+	{
+		Stage->OnStageStateChanged.RemoveDynamic(this, &AGridPlayerController::HandleStageStateChanged);
+	}
+	BoundStage.Reset();
+
+	Super::EndPlay(EndPlayReason);
+}
+
+// ---------------------------------------------------------------------------- 구역 카메라
+
+void AGridPlayerController::HandleStageStateChanged(const FStageState& State)
+{
+	if (!State.bResolved)
+	{
+		return;
+	}
+
+	const bool bLevelStart = (AppliedZoneIndex == INDEX_NONE);
+	if (!bLevelStart && State.CurrentZoneIndex == AppliedZoneIndex)
+	{
+		return;
+	}
+
+	AppliedZoneIndex = State.CurrentZoneIndex;
+
+	// 레벨 시작은 보간 없이 곧바로 붙인다. 첫 화면에서 카메라가 날아오는 장면이 보이면 안 된다.
+	BlendToZoneCamera(State.CurrentZoneIndex, bLevelStart ? 0.0f : -1.0f);
+}
+
+void AGridPlayerController::BlendToZoneCamera(int32 ZoneIndex, float BlendTime)
+{
+	const UStageSubsystem* Stage = UStageSubsystem::Get(this);
+	const AStageInfo* Info = Stage ? Stage->GetStageInfo() : nullptr;
+	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
+
+	AActor* Target = nullptr;
+	if (GridPawn && GridPawn->IsPawnCameraActive())
+	{
+		// 디버그 카메라가 켜져 있으면 구역과 상관없이 폰을 따라간다.
+		Target = GridPawn;
+	}
+	else if (Info)
+	{
+		Target = Info->GetZoneCamera(ZoneIndex);
+	}
+
+	if (!Target)
+	{
+		UE_LOG(LogLTTSGrid, Warning,
+			TEXT("%s: zone %d has no camera and the pawn camera is off; the view stays on %s. Fill AStageInfo::ZoneCameras or set ltts.PawnCamera 1."),
+			*GetName(), ZoneIndex, *GetNameSafe(GetViewTarget()));
+		return;
+	}
+
+	// 이미 그쪽을 보고 있거나 그쪽으로 옮겨 가는 중이면 건드리지 않는다.
+	const AActor* PendingTarget = PlayerCameraManager ? PlayerCameraManager->PendingViewTarget.Target.Get() : nullptr;
+	const AActor* Destination = PendingTarget ? PendingTarget : GetViewTarget();
+	if (Target == Destination)
+	{
+		return;
+	}
+
+	const float Time = (BlendTime >= 0.0f) ? BlendTime : (Info ? Info->CameraBlendTime : 0.0f);
+	const EViewTargetBlendFunction Function = Info ? Info->CameraBlendFunction.GetValue() : VTBlend_Linear;
+
+	// bLockOutgoing을 켜는 이유: 엔진은 "떠나던 대상으로 되돌아가기"를 블렌드 취소로 처리해 시점을
+	// 순간이동시킨다. 켜 두면 옮겨 가는 도중에 목표가 바뀌어도 지금 보이는 시점에서 이어서 움직인다.
+	// 고정 카메라끼리는 떠나는 쪽이 움직이지 않으므로 잃는 것이 없다.
+	// BlendExp는 EaseIn/Out 계열에만 쓰인다.
+	SetViewTargetWithBlend(Target, Time, Function, /*BlendExp*/ 2.0f, /*bLockOutgoing*/ true);
+
+	UE_LOG(LogLTTSGrid, Display, TEXT("%s: view target -> %s (zone %d, %.2fs)."),
+		*GetName(), *Target->GetActorNameOrLabel(), ZoneIndex, Time);
+}
+
+bool AGridPlayerController::IsBlendingView() const
+{
+	return PlayerCameraManager && PlayerCameraManager->PendingViewTarget.Target != nullptr;
+}
+
+void AGridPlayerController::SyncPawnCamera()
+{
+	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
+	if (!GridPawn)
+	{
+		return;
+	}
+
+	const bool bWanted = GridPawn->ShouldUsePawnCamera();
+	if (bWanted == GridPawn->IsPawnCameraActive())
+	{
+		return;
+	}
+
+	GridPawn->SetPawnCameraActive(bWanted);
+
+	const UStageSubsystem* Stage = BoundStage.Get();
+	const int32 Zone = Stage ? Stage->GetCurrentZoneIndex() : 0;
+
+	UE_LOG(LogLTTSGrid, Display, TEXT("%s: pawn debug camera %s."), *GetName(), bWanted ? TEXT("on") : TEXT("off"));
+
+	// 켜면 폰으로, 끄면 지금 구역의 카메라로 보간해 돌아간다.
+	BlendToZoneCamera(Zone);
 }
 
 void AGridPlayerController::SetupInputComponent()
@@ -59,6 +216,19 @@ void AGridPlayerController::SetupInputComponent()
 		ClickAction->ValueType = EInputActionValueType::Boolean;
 
 		MappingContext->MapKey(ClickAction, EKeys::LeftMouseButton);
+
+		for (const FMoveKeyBinding& Binding : GetMoveKeyBindings())
+		{
+			UInputAction* Action = NewObject<UInputAction>(this, Binding.ActionName);
+			Action->ValueType = EInputActionValueType::Boolean;
+
+			for (const FKey& Key : Binding.Keys)
+			{
+				MappingContext->MapKey(Action, Key);
+			}
+
+			MoveActions[static_cast<int32>(Binding.Dir)] = Action;
+		}
 	}
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
@@ -71,6 +241,18 @@ void AGridPlayerController::SetupInputComponent()
 	{
 		EnhancedInput->BindAction(ClickAction, ETriggerEvent::Started, this, &AGridPlayerController::OnPressed);
 		EnhancedInput->BindAction(ClickAction, ETriggerEvent::Completed, this, &AGridPlayerController::OnReleased);
+
+		for (const FMoveKeyBinding& Binding : GetMoveKeyBindings())
+		{
+			UInputAction* Action = MoveActions[static_cast<int32>(Binding.Dir)];
+			if (!Action)
+			{
+				continue;
+			}
+
+			EnhancedInput->BindAction(Action, ETriggerEvent::Started, this, &AGridPlayerController::OnMoveKeyPressed, Binding.Dir);
+			EnhancedInput->BindAction(Action, ETriggerEvent::Completed, this, &AGridPlayerController::OnMoveKeyReleased, Binding.Dir);
+		}
 	}
 }
 
@@ -205,12 +387,13 @@ FCursorPick AGridPlayerController::PickUnderCursor() const
 		}
 
 		// 블록은 어느 면으로든 잡힌다. 옆면이 그 뒤의 바닥을 가로막는 것은 여전하지만,
-		// 이제 그 셀은 블록을 클릭해서 갈 수 있다: 블록 픽이 FloorCell을 함께 들고 간다.
+		// 이동이 키보드로 옮겨 간 뒤로는(2026-09-11) 그 셀로 가는 데 커서가 필요 없다.
 		//
 		// --- TOP-FACE-ONLY PICK DISABLED 2026-09-08 ---
 		// 예전에는 윗면 히트만 잡기로 쳤다. 옆면 히트를 그랩으로 취급하면 그 뒤 셀을
 		// 영영 클릭할 수 없었기 때문인데, 대신 옆면을 잡으려다 폰이 걸어가 버렸다.
-		// 되살리려면 아래 #if 0을 1로 바꾸고 HandleBlockClick의 바닥 이동 분기를 지운다.
+		// 되살릴 이유는 이제 없다: 클릭은 폰을 보내지 않으므로 옆면을 잡아도 잃는 것이 없다.
+		// FloorCell은 클릭 이동과 함께 잠들어 있다(HandleBlockClick의 가드된 분기).
 		if (APuzzleBlock* Block = Cast<APuzzleBlock>(Hit.GetActor()))
 		{
 #if 0
@@ -427,8 +610,14 @@ void AGridPlayerController::OnPressed()
 			ShowFeedback(Pick.VehicleRefusal.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
 		}
 
+		// --- CLICK-TO-MOVE DISABLED 2026-09-11 (WASD) ---
+		// 이동은 이제 키보드가 맡는다(2절). 클릭에는 "저것을 조작하겠다"는 뜻만 남으므로 빈
+		// 바닥을 누르는 것은 아무 뜻도 아니다. 코드를 지우지 않는 이유는 되돌릴 수 있어야
+		// 하기 때문이다: 이 마커를 찾아 가드를 걷어 내면 클릭 이동이 그대로 돌아온다.
+#if 0
 		// 바닥에는 끌 것이 없으므로 누르는 즉시 처리한다. 뗄 때까지 기다리면 응답만 늦다.
 		MovePawnToCell(Pick.Cell);
+#endif
 		return;
 	}
 
@@ -749,7 +938,6 @@ void AGridPlayerController::BeginBlockDrag(const FCursorPick& Pick)
 	// 문턱을 넘느라 움직인 몇 픽셀만큼 블록이 손에서 미끄러지지 않는다.
 	DraggedBlock = Block;
 	GrabPoint = Pick.HitLocation;
-	GrabOffset = Pick.HitLocation - Block->GetActorLocation();
 	DragAxis = Block->GetWorldMoveAxis();
 	bHasRefusedDir = false;
 	StepsThisDrag = 0;
@@ -772,6 +960,10 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 		return;
 	}
 
+	// --- CLICK-TO-MOVE DISABLED 2026-09-11 (WASD) ---
+	// 블록 위의 클릭이 그 뒤 바닥으로 걸어가라는 뜻이었던 것도 같은 이유로 꺼 둔다. 이제
+	// 블록을 눌렀다 그냥 떼는 것은 밀려던 손이 미끄러진 것이므로, 미는 법을 알려 준다.
+#if 0
 	// 그 밖의 블록 위 클릭은 그 블록이 없는 셈 치고 폰을 보낸다. 블록이 선 셀 자체를
 	// 클릭한 것이라면 기존 "Blocked by object" 거부가 그대로 나온다.
 	if (Pick.bHasFloorCell)
@@ -779,8 +971,120 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 		MovePawnToCell(Pick.FloorCell);
 		return;
 	}
+#endif
 
-	ShowFeedback(TEXT("Click somewhere on the grid."), FLinearColor::Red);
+	ShowFeedback(TEXT("Drag a block to push it."), FLinearColor::White);
+}
+
+// ---------------------------------------------------------------------------- 키보드 이동
+
+void AGridPlayerController::OnMoveKeyPressed(EScreenMoveDir Dir)
+{
+	// 마지막에 누른 키가 이긴다. 이미 목록에 있더라도(키 반복 등) 맨 뒤로 옮긴다.
+	HeldMoveKeys.Remove(Dir);
+	HeldMoveKeys.Add(Dir);
+
+	// 이동 키를 누른 것은 마우스를 누른 것과 같은 뜻이다: 플레이어가 조작을 도로 가져갔으므로,
+	// 걸어가서 타기로 한 예약은 여기서 버린다. 남겨 두면 다른 데로 걸어간 뒤에도 예약이
+	// 살아남아 엉뚱한 순간에 태운다.
+	CancelPendingBoarding();
+
+	// 조각이 정리되는 동안에는 걷지 않는다. 키는 눌린 채로 두므로 정리되는 즉시 이어 걷는다.
+	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		if (Subsystem->IsInputLocked())
+		{
+			ShowFeedback(TEXT("Wait for the pieces to settle."), FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+	}
+}
+
+void AGridPlayerController::OnMoveKeyReleased(EScreenMoveDir Dir)
+{
+	HeldMoveKeys.Remove(Dir);
+}
+
+bool AGridPlayerController::IsMoveKeyDown(EScreenMoveDir Dir) const
+{
+	for (const FMoveKeyBinding& Binding : GetMoveKeyBindings())
+	{
+		if (Binding.Dir != Dir)
+		{
+			continue;
+		}
+
+		for (const FKey& Key : Binding.Keys)
+		{
+			if (IsInputKeyDown(Key))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	return false;
+}
+
+EGridDirection AGridPlayerController::ScreenDirToGridDir(EScreenMoveDir Dir) const
+{
+	double Yaw = KeyboardYawOffset;
+	if (PlayerCameraManager)
+	{
+		Yaw += PlayerCameraManager->GetCameraRotation().Yaw;
+	}
+
+	// 화면 위쪽이 기준이고 나머지는 시계 방향으로 90도씩이다. 카메라 yaw가 양수 방향으로
+	// 돌면 화면에서도 시계 방향으로 도는 값이므로 그냥 더하면 된다.
+	switch (Dir)
+	{
+	case EScreenMoveDir::Right:	Yaw += 90.0;	break;
+	case EScreenMoveDir::Down:	Yaw += 180.0;	break;
+	case EScreenMoveDir::Left:	Yaw += 270.0;	break;
+	default:									break;
+	}
+
+	// 어느 셀 축에 더 가까운지로 스냅한다. 아이소메트릭에서 두 축이 정확히 비기는 각도는
+	// KeyboardYawOffset이 이미 비켜 놓았으므로, 여기서는 우세한 축이 언제나 분명하다.
+	const FVector World = FRotator(0.0, Yaw, 0.0).Vector();
+
+	if (FMath::Abs(World.X) >= FMath::Abs(World.Y))
+	{
+		return (World.X >= 0.0) ? EGridDirection::East : EGridDirection::West;
+	}
+
+	return (World.Y >= 0.0) ? EGridDirection::North : EGridDirection::South;
+}
+
+void AGridPlayerController::UpdateKeyboardMove()
+{
+	AGridPawn* GridPawn = GetGridPawn();
+	if (!GridPawn)
+	{
+		return;
+	}
+
+	// 창이 포커스를 잃으면 뗌 이벤트가 유실될 수 있다. 매 틱 실제 키 상태로 걸러 두지 않으면
+	// 아무도 누르지 않은 방향으로 폰이 혼자 계속 걸어간다.
+	HeldMoveKeys.RemoveAll([this](EScreenMoveDir Dir) { return !IsMoveKeyDown(Dir); });
+
+	if (HeldMoveKeys.IsEmpty())
+	{
+		GridPawn->SetHeldDirection(TOptional<EGridDirection>());
+		return;
+	}
+
+	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
+	{
+		if (Subsystem->IsInputLocked())
+		{
+			GridPawn->SetHeldDirection(TOptional<EGridDirection>());
+			return;
+		}
+	}
+
+	GridPawn->SetHeldDirection(ScreenDirToGridDir(HeldMoveKeys.Last()));
 }
 
 // ---------------------------------------------------------------------------- 레버 드래그
@@ -906,15 +1210,11 @@ void AGridPlayerController::UpdateDrag()
 		return;
 	}
 
-	if (Block->IsAnimating())
-	{
-		return;		// 한 번에 한 셀; 스텝이 끝나기를 기다린다
-	}
-
-	// 드래그 한 번에 이동 한 번. 블록은 계속 쥔 상태로 두되, 플레이어가 놓았다가 다시
-	// 잡기 전까지는 더 시도하지 않는다.
+	// 드래그 한 번에 이동 한 번(bOneStepPerDrag를 켠 조각의 회귀 동작). 블록은 계속 쥔
+	// 상태로 두되, 플레이어가 놓았다가 다시 잡기 전까지는 더 시도하지 않는다.
 	if (Block->bOneStepPerDrag && StepsThisDrag >= 1)
 	{
+		Block->SetHeldSlideDirection(TOptional<EGridDirection>());
 		return;
 	}
 
@@ -937,13 +1237,12 @@ void AGridPlayerController::UpdateDrag()
 		WorldOrigin + WorldDirection * 100000.0,
 		FPlane(GrabPoint, FVector::UpVector));
 
-	// 드래그 시작점이 아니라 블록의 현재 위치에서 재기 때문에 자유 블록을 모퉁이 너머로
-	// 끌고 갈 수 있다: 스텝마다 커서 기준으로 새로 고른다.
-	const FVector Target = Cursor - GrabOffset;
-	const FVector Current = Block->GetActorLocation();
-
-	double DeltaX = (DragAxis == EPuzzleMoveAxis::AxisY) ? 0.0 : Target.X - Current.X;
-	double DeltaY = (DragAxis == EPuzzleMoveAxis::AxisX) ? 0.0 : Target.Y - Current.Y;
+	// 블록의 현재 위치가 아니라 **잡은 지점**에서 잰다(2026-09-11). 블록 기준으로 재면
+	// 블록이 커서를 따라오면서 델타를 도로 0으로 만들어, 한 칸 갈 때마다 손을 한 칸씩 더
+	// 움직여야 했다. 이제 커서는 방향을 가리키는 조이스틱이다: 잡은 지점에서 반 칸 이상
+	// 밀어 둔 채로 있으면 그쪽으로 계속 밀리고, 반 칸 안으로 되돌리면 멈춘다.
+	double DeltaX = (DragAxis == EPuzzleMoveAxis::AxisY) ? 0.0 : Cursor.X - GrabPoint.X;
+	double DeltaY = (DragAxis == EPuzzleMoveAxis::AxisX) ? 0.0 : Cursor.Y - GrabPoint.Y;
 
 	const double Threshold = Grid->CellSize * 0.5;
 
@@ -971,18 +1270,39 @@ void AGridPlayerController::UpdateDrag()
 
 	if (NumCandidates == 0)
 	{
-		bHasRefusedDir = false;		// 커서가 반 셀 안으로 돌아왔다; 메시지를 다시 준비한다
+		// 커서가 잡은 지점 둘레 반 칸 안으로 돌아왔다. 가고 있던 칸까지만 가고 선다.
+		Block->SetHeldSlideDirection(TOptional<EGridDirection>());
+		bHasRefusedDir = false;		// 메시지를 다시 준비한다
 		return;
 	}
 
+	// 지금 이어 갈 수 있는 방향을 고른다.
+	//
+	// 슬라이드 중에도 MinCell은 이미 목적지 칸이므로, CanSlide는 "도착한 뒤에 그쪽으로 더
+	// 갈 수 있는가"에 답한다. 덕분에 주축이 막혀 벽을 따라 미끄러지는 동안에도 이음이
+	// 끊기지 않고, 커서를 반대로 넘기면 다음 칸에서 방향이 바뀐다.
+	TOptional<EGridDirection> HeldDir;
 	for (int32 Index = 0; Index < NumCandidates; ++Index)
 	{
-		if (Block->StartSlide(Candidates[Index]))
+		if (Block->CanSlide(Candidates[Index]))
 		{
-			++StepsThisDrag;
-			bHasRefusedDir = false;
-			return;
+			HeldDir = Candidates[Index];
+			break;
 		}
+	}
+
+	Block->SetHeldSlideDirection(HeldDir);
+
+	if (Block->IsAnimating())
+	{
+		return;		// 가고 있다. 도착하면 블록이 자기 Tick에서 다음 칸을 이어 붙인다.
+	}
+
+	if (HeldDir.IsSet() && Block->StartSlide(HeldDir.GetValue()))
+	{
+		++StepsThisDrag;
+		bHasRefusedDir = false;
+		return;
 	}
 
 	// 아무것도 움직이지 않았다. 플레이어가 실제로 끌던 방향을 보고한다.
@@ -1011,8 +1331,10 @@ void AGridPlayerController::FinishDrag()
 	StepsThisDrag = 0;
 	bHasRefusedDir = false;
 	DragAxis = EPuzzleMoveAxis::None;
-	GrabOffset = FVector::ZeroVector;
 
+	// 이어 밀 방향부터 지운다. SetHeld(false)도 지우지만, 이미 놓인 블록에 대해서는 일찍
+	// 빠져나가므로 여기서 한 번 더 분명히 해 둔다.
+	Block->SetHeldSlideDirection(TOptional<EGridDirection>());
 	Block->SetHeld(false);
 
 	if (Steps > 0)
@@ -1077,12 +1399,16 @@ FString AGridPlayerController::GetDragStatusText() const
 		return FString();
 	}
 
-	return FString::Printf(TEXT("Holding %s (%d step(s))"), *Block->GetName(), StepsThisDrag);
+	// 블록이 자기 Tick에서 이어 붙인 걸음까지 세려면 블록에게 물어야 한다. StepsThisDrag는
+	// 컨트롤러가 직접 시작한 첫 걸음만 센다.
+	return FString::Printf(TEXT("Holding %s (%d step(s))"), *Block->GetName(), Block->GetStepsWhileHeld());
 }
 
 void AGridPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
+
+	SyncPawnCamera();
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
 #if 0
@@ -1104,6 +1430,8 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 	{
 		UpdatePendingPress();
 	}
+
+	UpdateKeyboardMove();
 
 	if (DraggedLever.IsValid())
 	{
@@ -1214,3 +1542,31 @@ void AGridPlayerController::UpdateHover()
 	LastHoveredBlock = Pick.Block;
 	bHadHover = true;
 }
+
+// ---------------------------------------------------------------------------- 콘솔
+
+static void ZoneCameraCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!World || Args.Num() < 1)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.ZoneCamera: usage ltts.ZoneCamera <ZoneIndex> [BlendSeconds]"));
+		return;
+	}
+
+	AGridPlayerController* Controller = Cast<AGridPlayerController>(World->GetFirstPlayerController());
+	if (!Controller)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.ZoneCamera: no grid player controller."));
+		return;
+	}
+
+	const int32 ZoneIndex = FCString::Atoi(*Args[0]);
+	const float BlendSeconds = (Args.Num() >= 2) ? FCString::Atof(*Args[1]) : -1.0f;
+	Controller->BlendToZoneCamera(ZoneIndex, BlendSeconds);
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GZoneCameraCommand(
+	TEXT("ltts.ZoneCamera"),
+	TEXT("Blend the view to a zone camera without walking there: ltts.ZoneCamera <ZoneIndex> [BlendSeconds]. ")
+	TEXT("BlendSeconds defaults to AStageInfo::CameraBlendTime; 0 switches instantly."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&ZoneCameraCommand));

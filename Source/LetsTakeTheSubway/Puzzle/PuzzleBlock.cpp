@@ -14,6 +14,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -427,7 +428,8 @@ bool APuzzleBlock::CanSlide(EGridDirection Dir, FText* OutReason) const
 		return false;
 	}
 
-	const FGridRect Target(MinCell + LTTSGrid::DirOffset(Dir), GetWorldFootprint());
+	const FIntPoint Delta = LTTSGrid::DirOffset(Dir);
+	const FGridRect Target(MinCell + Delta, GetWorldFootprint());
 
 	if (!CanOccupyRect(Target, OutReason))
 	{
@@ -448,8 +450,23 @@ bool APuzzleBlock::CanSlide(EGridDirection Dir, FText* OutReason) const
 		}
 	}
 
+	// 목적지에서 **실제로 점유할** 셀을 본다. 사각형 전체가 아니다.
+	//
+	// 슬라이드는 회전 없는 평행이동이므로, 지금 점유한 셀을 그대로 옮기면 그것이 목적지의
+	// 점유 셀이다. 그리고 그 목록은 GatherOccupiedCells가 이미 빈 영역과 홈을 빼고 만든
+	// 것이라, 파생 클래스마다 다른 모양(L자 벤치의 빈 자리, 회전 장애물의 채널)이 저절로
+	// 따라온다.
+	//
+	// 사각형으로 따지던 시절에는 L자 벤치가 감싼 기둥이 자기 빈 자리에 서 있는데도
+	// "무언가 가로막고 있다"가 되어 어느 방향으로도 밀리지 않았다. 점유를 등록할 때와
+	// 이동을 판정할 때가 서로 다른 규칙을 쓰고 있었던 것이다.
 	TArray<FIntPoint> Cells;
-	Target.GatherCells(Cells);
+	GatherOccupiedCells(Cells);
+
+	for (FIntPoint& Cell : Cells)
+	{
+		Cell += Delta;
+	}
 
 	// 폰은 한 걸음의 대부분을 두 셀 사이에서 보내므로, 폰이 향하기로 한 셀도 점유된
 	// 것으로 친다: 그 셀로 슬라이드한 블록은 결국 폰 위에 올라서게 된다.
@@ -521,6 +538,10 @@ void APuzzleBlock::SetHeld(bool bInHeld)
 
 	bHeld = bInHeld;
 
+	// 잡든 놓든 이어 밀 방향은 지운다. 새로 잡은 손이 지난번 제스처의 방향을 물려받아서는
+	// 안 되고, 놓은 블록은 지금 향하던 칸에서 서야 한다.
+	HeldSlideDir.Reset();
+
 	if (bHeld)
 	{
 		StepsWhileHeld = 0;
@@ -533,6 +554,11 @@ void APuzzleBlock::SetHeld(bool bInHeld)
 	{
 		ReportAtRest();
 	}
+}
+
+void APuzzleBlock::SetHeldSlideDirection(TOptional<EGridDirection> Dir)
+{
+	HeldSlideDir = Dir;
 }
 
 void APuzzleBlock::ReportAtRest()
@@ -618,18 +644,43 @@ void APuzzleBlock::Tick(float DeltaSeconds)
 	{
 	case EAnimState::Sliding:
 	{
-		const FVector NewLocation = FMath::VInterpConstantTo(GetActorLocation(), SlideTarget, DeltaSeconds, SlideSpeed);
-		SetActorLocation(NewLocation);
+		// 이번 프레임에 갈 수 있는 거리를 예산으로 두고, 칸에 도착하면 남은 예산을 그대로
+		// 다음 칸으로 이월한다. 도착한 프레임을 그냥 끝내고 다음 틱에 컨트롤러가 다시
+		// 밀어 주기를 기다리면 칸마다 한 프레임씩 서게 되어, 이어 미는 동안 속도가 셀
+		// 경계마다 눈에 띄게 끊긴다.
+		double Budget = static_cast<double>(SlideSpeed) * DeltaSeconds;
 
-		if (NewLocation.Equals(SlideTarget, 0.5))
+		while (Budget > 0.0)
 		{
+			const FVector Location = GetActorLocation();
+			const FVector ToTarget = SlideTarget - Location;
+			const double Remaining = ToTarget.Size();
+
+			// 0.5는 예전 VInterpConstantTo + Equals(0.5) 시절의 도착 허용 오차 그대로다.
+			if (Remaining > Budget + 0.5)
+			{
+				SetActorLocation(Location + ToTarget * (Budget / Remaining));
+				break;
+			}
+
 			SetActorLocation(SlideTarget);
+			Budget -= Remaining;
 			AnimState = EAnimState::Idle;
+
+			// 쥔 손이 여전히 같은 쪽을 가리키고 있으면 곧바로 다음 칸을 시작한다.
+			// StartSlide가 IsAnimating()을 보므로 Idle로 되돌린 뒤에 부른다. 성공할
+			// 때마다 남은 거리가 한 셀만큼 늘어나므로 이 루프는 반드시 끝난다.
+			if (bHeld && HeldSlideDir.IsSet() && StartSlide(HeldSlideDir.GetValue()))
+			{
+				continue;
+			}
 
 			if (!bHeld)
 			{
 				ReportAtRest();
 			}
+
+			break;
 		}
 		break;
 	}
@@ -726,3 +777,77 @@ void APuzzleBlock::PostEditChangeProperty(FPropertyChangedEvent& PropertyChanged
 }
 
 #endif
+
+// ---------------------------------------------------------------------------- 콘솔
+//
+// 블록 밀기는 마우스 드래그로만 시작된다. 그래서 "이 조각이 저쪽으로 밀리는가"는 자동으로
+// 확인할 수 없는 질문이었다 -- 빈 영역을 감싼 조각처럼 판정이 미묘한 경우일수록 더 그랬다.
+// 열차의 ltts.TrainArrive, 엘리베이터의 ltts.ElevatorRide와 같은 자리다.
+
+namespace
+{
+	bool ParseGridDirection(const FString& Text, EGridDirection& OutDir)
+	{
+		const FString Upper = Text.ToUpper();
+
+		if (Upper.StartsWith(TEXT("N"))) { OutDir = EGridDirection::North; return true; }
+		if (Upper.StartsWith(TEXT("E"))) { OutDir = EGridDirection::East;  return true; }
+		if (Upper.StartsWith(TEXT("S"))) { OutDir = EGridDirection::South; return true; }
+		if (Upper.StartsWith(TEXT("W"))) { OutDir = EGridDirection::West;  return true; }
+
+		return false;
+	}
+
+	void BlockSlideCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockSlide: run this in play mode."));
+			return;
+		}
+
+		if (Args.Num() < 2)
+		{
+			UE_LOG(LogLTTSGrid, Warning,
+				TEXT("ltts.BlockSlide: usage is ltts.BlockSlide <name substring> <N|E|S|W>"));
+			return;
+		}
+
+		EGridDirection Dir = EGridDirection::North;
+		if (!ParseGridDirection(Args[1], Dir))
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockSlide: '%s' is not N, E, S or W."), *Args[1]);
+			return;
+		}
+
+		for (TActorIterator<APuzzleBlock> It(World); It; ++It)
+		{
+			APuzzleBlock* Block = *It;
+			if (!Block
+				|| (!Block->GetName().Contains(Args[0]) && !Block->GetActorNameOrLabel().Contains(Args[0])))
+			{
+				continue;
+			}
+
+			// 거부 사유를 먼저 물어 두면, 밀리지 않았을 때 왜인지가 로그에 남는다.
+			FText Reason;
+			const bool bAllowed = Block->CanSlide(Dir, &Reason);
+			const bool bMoved = bAllowed && Block->StartSlide(Dir);
+
+			UE_LOG(LogLTTSGrid, Display,
+				TEXT("ltts.BlockSlide: %s %s -> %s%s"),
+				*Block->GetActorNameOrLabel(),
+				*StaticEnum<EGridDirection>()->GetNameStringByValue(static_cast<int64>(Dir)),
+				bMoved ? TEXT("moving") : TEXT("refused"),
+				bMoved ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *Reason.ToString()));
+			return;
+		}
+
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockSlide: no block matching '%s'."), *Args[0]);
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GBlockSlideCommand(
+	TEXT("ltts.BlockSlide"),
+	TEXT("Push a puzzle block one cell as a drag would: ltts.BlockSlide <name substring> <N|E|S|W>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&BlockSlideCommand));

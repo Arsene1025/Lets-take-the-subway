@@ -6,14 +6,26 @@
 #include "Grid/GridActor.h"
 #include "Grid/GridDebug.h"
 #include "Player/GridPlayerController.h"
+#include "Stage/StageTypes.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+
+// --- PAWN CAMERA DISABLED 2026-09-14 ---
+// 폰을 따라가는 디버그 카메라 스위치. 구역 카메라가 없는 맵을 볼 때 1로 켠다.
+static TAutoConsoleVariable<int32> CVarPawnCamera(
+	TEXT("ltts.PawnCamera"),
+	0,
+	TEXT("1 = view through the pawn-following debug camera instead of the zone cameras (AStageInfo::ZoneCameras). ")
+	TEXT("Use it on maps without zone cameras. 0 = zone cameras (default)."),
+	ECVF_Default);
 
 AGridPawn::AGridPawn()
 {
@@ -25,6 +37,18 @@ AGridPawn::AGridPawn()
 	Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Sphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 	Sphere->SetGenerateOverlapEvents(false);
+
+	// 구역 볼륨만 보는 프로브. 오브젝트 타입과 전체 Ignore를 먼저 정하고 StageZone 채널만 연다.
+	ZoneProbe = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneProbe"));
+	ZoneProbe->SetupAttachment(Sphere);
+	ZoneProbe->InitSphereRadius(8.0f);
+	ZoneProbe->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	ZoneProbe->SetCollisionObjectType(ECC_Pawn);
+	ZoneProbe->SetCollisionResponseToAllChannels(ECR_Ignore);
+	ZoneProbe->SetCollisionResponseToChannel(LTTSStage::ZoneObjectChannel, ECR_Overlap);
+	ZoneProbe->SetGenerateOverlapEvents(true);
+	ZoneProbe->SetCanEverAffectNavigation(false);
+	ZoneProbe->SetHiddenInGame(true);
 
 	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
 	BodyMesh->SetupAttachment(Sphere);
@@ -61,6 +85,11 @@ AGridPawn::AGridPawn()
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
 	Camera->bUsePawnControlRotation = false;
+
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	// 기본으로 꺼 둔다. 시점은 구역 카메라가 맡는다. BeginPlay에서 bUsePawnCamera / ltts.PawnCamera를
+	// 보고 다시 켠다. 스프링암은 그대로 둔다: 카메라가 꺼져 있으면 아무것도 그리지 않는다.
+	Camera->SetAutoActivate(false);
 }
 
 void AGridPawn::BeginPlay()
@@ -72,6 +101,9 @@ void AGridPawn::BeginPlay()
 		SpringArm->TargetArmLength = CameraArmLength;
 		SpringArm->SetWorldRotation(CameraRotation);
 	}
+
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	SetPawnCameraActive(ShouldUsePawnCamera());
 
 	// 디자이너가 인스턴스에서 반지름을 조정할 수 있으니, 콜리전 없는 바운드와 보이는
 	// 공을 그 값에 맞춰 둔다.
@@ -203,6 +235,86 @@ void AGridPawn::RequestMoveToCell(FIntPoint Goal)
 	PlanPath(Goal);
 }
 
+void AGridPawn::SetHeldDirection(TOptional<EGridDirection> Dir)
+{
+	// TOptional의 비교 연산자에 기대지 않고 직접 본다. 값이 있고 없고와 값 자체를 나눠 보는
+	// 편이 무엇을 비교하는지도 분명하다.
+	const bool bSame = (HeldDirection.IsSet() == Dir.IsSet())
+		&& (!Dir.IsSet() || HeldDirection.GetValue() == Dir.GetValue());
+
+	if (!bSame)
+	{
+		// 방향이 바뀌었으면 막혔다는 안내를 새 방향에 대해 다시 낼 수 있어야 한다.
+		bHeldDirectionBlockedReported = false;
+	}
+
+	HeldDirection = Dir;
+
+	if (!HeldDirection.IsSet())
+	{
+		return;
+	}
+
+	// 클릭이나 탑승 예약으로 세워 둔 긴 경로는 버린다. 플레이어가 폰을 직접 밀기 시작했으므로
+	// 지금 들어가고 있는 칸까지만 마저 가고, 그다음부터는 키가 정한다. 지금 칸을 버리지 않는
+	// 이유는 두 셀 사이에서 폰을 멈춰 세울 수 없기 때문이다.
+	if (Path.Num() > 1)
+	{
+		Path.SetNum(1);
+		GoalCell = Path[0];
+	}
+
+	PendingGoal.Reset();
+}
+
+bool AGridPawn::StepOnce(EGridDirection Dir)
+{
+	SetHeldDirection(Dir);
+	const bool bStepped = TryStepHeldDirection();
+
+	// 이어 걷지 않는다. 이미 세워 둔 한 칸짜리 경로는 그대로 걸어간다.
+	SetHeldDirection(TOptional<EGridDirection>());
+
+	return bStepped;
+}
+
+bool AGridPawn::TryStepHeldDirection()
+{
+	if (!Grid || !HeldDirection.IsSet() || RideState != ERideState::OnGrid)
+	{
+		return false;
+	}
+
+	const FIntPoint NextCell = CurrentCell + LTTSGrid::DirOffset(HeldDirection.GetValue());
+
+	FText DeniedMessage;
+	if (!Grid->CanPawnEnter(NextCell, this, &DeniedMessage))
+	{
+		// 막힌 쪽으로 한 번 부딪히고 선다. 키를 누르고 있는 동안 매 틱 다시 흔들거나 같은
+		// 줄을 다시 쓰지 않도록, 방향이 바뀌기 전까지는 한 번만 알린다.
+		if (!bHeldDirectionBlockedReported)
+		{
+			bHeldDirectionBlockedReported = true;
+			Bump(NextCell);
+			ReportFeedback(
+				FString::Printf(TEXT("Cell (%d,%d): %s"), NextCell.X, NextCell.Y, *DeniedMessage.ToString()),
+				FLinearColor(1.0f, 0.65f, 0.05f));
+		}
+
+		return false;
+	}
+
+	bHeldDirectionBlockedReported = false;
+
+	Path.Reset();
+	Path.Add(NextCell);
+	GoalCell = NextCell;
+	PendingGoal.Reset();
+
+	RefreshPathDebug();
+	return true;
+}
+
 void AGridPawn::StopAndSnapToCurrentCell(const FString& Reason, const FLinearColor& Color)
 {
 	Path.Reset();
@@ -219,6 +331,25 @@ void AGridPawn::StopAndSnapToCurrentCell(const FString& Reason, const FLinearCol
 		Color);
 
 	RefreshPathDebug();
+}
+
+// --- PAWN CAMERA DISABLED 2026-09-14 ---
+bool AGridPawn::ShouldUsePawnCamera() const
+{
+	return bUsePawnCamera || CVarPawnCamera.GetValueOnGameThread() != 0;
+}
+
+bool AGridPawn::IsPawnCameraActive() const
+{
+	return Camera && Camera->IsActive();
+}
+
+void AGridPawn::SetPawnCameraActive(bool bActive)
+{
+	if (Camera)
+	{
+		Camera->SetActive(bActive);
+	}
 }
 
 void AGridPawn::TeleportToCell(FIntPoint Cell)
@@ -477,59 +608,153 @@ void AGridPawn::Tick(float DeltaSeconds)
 		return;
 	}
 
+	// 서 있는데 이동 키가 눌려 있으면 첫 걸음을 세운다. 이어지는 걸음은 TickGridStep이
+	// 도착할 때마다 스스로 잇는다.
+	if (Path.IsEmpty() && HeldDirection.IsSet())
+	{
+		TryStepHeldDirection();
+	}
+
 	TickGridStep(DeltaSeconds);
 }
 
 void AGridPawn::TickGridStep(float DeltaSeconds)
 {
-	if (!Grid || Path.IsEmpty())
+	if (!Grid)
 	{
 		return;
 	}
 
-	const FIntPoint NextCell = Path[0];
+	// 이번 프레임에 걸을 수 있는 거리를 예산으로 두고, 셀에 도착하면 남은 예산을 그대로 다음
+	// 셀로 이월한다. 도착한 프레임을 그냥 끝내면 셀마다 한 프레임씩 서게 되어, 키를 누르고
+	// 있는 동안의 걸음이 셀 경계마다 눈에 띄게 끊긴다.
+	double Budget = static_cast<double>(MoveSpeed) * DeltaSeconds;
 
-	// Conditional 룰은 계획 시점과 도착 시점 사이에 바뀔 수 있으므로, 폰이 다음 셀에
-	// 들어가기 직전마다 다시 검사한다.
-	FText DeniedMessage;
-	if (!Grid->CanPawnEnter(NextCell, this, &DeniedMessage))
+	while (Budget > 0.0 && !Path.IsEmpty())
 	{
-		StopAndSnapToCurrentCell(DeniedMessage.ToString());
-		return;
-	}
+		const FIntPoint NextCell = Path[0];
 
-	const FVector TargetLocation = CellStandLocation(NextCell);
-	const FVector OldLocation = GetActorLocation();
-	const FVector NewLocation = FMath::VInterpConstantTo(OldLocation, TargetLocation, DeltaSeconds, MoveSpeed);
-	SetActorLocation(NewLocation);
-	RollBody(NewLocation - OldLocation);
+		// Conditional 룰은 계획 시점과 도착 시점 사이에 바뀔 수 있으므로, 폰이 다음 셀에
+		// 들어가기 직전마다 다시 검사한다.
+		FText DeniedMessage;
+		if (!Grid->CanPawnEnter(NextCell, this, &DeniedMessage))
+		{
+			StopAndSnapToCurrentCell(DeniedMessage.ToString());
+			return;
+		}
 
-	if (!NewLocation.Equals(TargetLocation, 0.5))
-	{
-		return;
-	}
+		const FVector TargetLocation = CellStandLocation(NextCell);
+		const FVector OldLocation = GetActorLocation();
+		const FVector ToTarget = TargetLocation - OldLocation;
+		const double Remaining = ToTarget.Size();
 
-	SetActorLocation(TargetLocation);
-	CurrentCell = NextCell;
-	Path.RemoveAt(0);
+		// 0.5는 예전 VInterpConstantTo + Equals(0.5) 시절의 도착 허용 오차 그대로다.
+		if (Remaining > Budget + 0.5)
+		{
+			const FVector NewLocation = OldLocation + ToTarget * (Budget / Remaining);
+			SetActorLocation(NewLocation);
+			RollBody(NewLocation - OldLocation);
+			return;
+		}
 
-	Grid->NotifyPawnEnteredCell(this, CurrentCell);
+		SetActorLocation(TargetLocation);
+		RollBody(TargetLocation - OldLocation);
+		Budget -= Remaining;
 
-	if (PendingGoal.IsSet())
-	{
-		const FIntPoint Goal = PendingGoal.GetValue();
-		PendingGoal.Reset();
-		Path.Reset();
-		PlanPath(Goal);
-		return;
-	}
+		CurrentCell = NextCell;
+		Path.RemoveAt(0);
 
-	if (Path.IsEmpty())
-	{
-		ReportFeedback(
-			FString::Printf(TEXT("Arrived at (%d,%d)."), CurrentCell.X, CurrentCell.Y),
-			FLinearColor::White);
+		Grid->NotifyPawnEnteredCell(this, CurrentCell);
+
+		if (PendingGoal.IsSet())
+		{
+			const FIntPoint Goal = PendingGoal.GetValue();
+			PendingGoal.Reset();
+			Path.Reset();
+			PlanPath(Goal);
+			continue;
+		}
+
+		// 키를 계속 누르고 있으면 남은 예산 그대로 다음 셀을 이어 붙인다. 막혔으면
+		// TryStepHeldDirection이 그 자리에서 부딪히는 연출과 사유를 낸다.
+		if (Path.IsEmpty() && HeldDirection.IsSet())
+		{
+			TryStepHeldDirection();
+			continue;
+		}
+
+		if (Path.IsEmpty())
+		{
+			ReportFeedback(
+				FString::Printf(TEXT("Arrived at (%d,%d)."), CurrentCell.X, CurrentCell.Y),
+				FLinearColor::White);
+		}
 	}
 
 	RefreshPathDebug();
 }
+
+// ---------------------------------------------------------------------------- 콘솔
+//
+// 걷기는 이제 이동 키로만 시작된다. 그래서 "폰이 이쪽으로 한 칸 갈 수 있는가"는 키보드
+// 없이는 물을 수 없는 질문이 됐다. 블록의 ltts.BlockSlide와 같은 자리다.
+
+namespace
+{
+	bool ParsePawnDirection(const FString& Text, EGridDirection& OutDir)
+	{
+		const FString Upper = Text.ToUpper();
+
+		if (Upper.StartsWith(TEXT("N"))) { OutDir = EGridDirection::North; return true; }
+		if (Upper.StartsWith(TEXT("E"))) { OutDir = EGridDirection::East;  return true; }
+		if (Upper.StartsWith(TEXT("S"))) { OutDir = EGridDirection::South; return true; }
+		if (Upper.StartsWith(TEXT("W"))) { OutDir = EGridDirection::West;  return true; }
+
+		return false;
+	}
+
+	void PawnStepCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.PawnStep: run this in play mode."));
+			return;
+		}
+
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.PawnStep: usage is ltts.PawnStep <N|E|S|W>"));
+			return;
+		}
+
+		EGridDirection Dir = EGridDirection::North;
+		if (!ParsePawnDirection(Args[0], Dir))
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.PawnStep: '%s' is not N, E, S or W."), *Args[0]);
+			return;
+		}
+
+		const APlayerController* Controller = World->GetFirstPlayerController();
+		AGridPawn* Pawn = Controller ? Cast<AGridPawn>(Controller->GetPawn()) : nullptr;
+
+		if (!Pawn)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.PawnStep: no grid pawn is possessed."));
+			return;
+		}
+
+		const FIntPoint From = Pawn->GetCurrentCell();
+		const bool bStepped = Pawn->StepOnce(Dir);
+
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("ltts.PawnStep: (%d,%d) %s -> %s"),
+			From.X, From.Y,
+			*StaticEnum<EGridDirection>()->GetNameStringByValue(static_cast<int64>(Dir)),
+			bStepped ? TEXT("walking") : TEXT("refused"));
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GPawnStepCommand(
+	TEXT("ltts.PawnStep"),
+	TEXT("Walk the player pawn one cell as a movement key would: ltts.PawnStep <N|E|S|W>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PawnStepCommand));

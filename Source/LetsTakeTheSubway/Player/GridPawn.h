@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "Grid/GridTypes.h"
 #include "GridPawn.generated.h"
 
 class AGridActor;
@@ -21,6 +22,9 @@ class UStaticMeshComponent;
  * 동작한다.
  *
  * 몸체는 공이다: 그리드 셀 하나에 들어가는 1 m 구체이고 이동하면서 굴러간다.
+ *
+ * 예외는 ZoneProbe 하나다. 공 중심의 작은 구체가 구역 볼륨(AStageZoneVolume)과만 오버랩한다.
+ * 막는 응답이 없고 스윕도 하지 않으므로 이동에는 영향이 없다.
  */
 UCLASS()
 class LETSTAKETHESUBWAY_API AGridPawn : public APawn
@@ -57,6 +61,27 @@ public:
 
 	/** 지금 경로를 계획하거나, 셀 스텝이 진행 중이면 그 스텝이 끝난 뒤 계획한다. */
 	void RequestMoveToCell(FIntPoint Goal);
+
+	/**
+	 * 이동 키를 누르고 있는 동안 계속 걸을 방향. 비어 있으면 지금 향하던 셀에 서고 멈춘다.
+	 *
+	 * 길찾기가 아니라 방향인 이유는 조작이 키보드이기 때문이다(2026-09-11). 플레이어가
+	 * 목적지를 고르는 것이 아니라 폰을 직접 민다. 컨트롤러가 매 틱 이것을 갱신하고, 칸과
+	 * 칸을 이어 붙이는 일은 폰이 자기 Tick에서 한다 -- 도착한 프레임을 그냥 끝내면 칸마다
+	 * 한 프레임씩 서게 되어 걸음이 셀 경계마다 끊긴다.
+	 */
+	void SetHeldDirection(TOptional<EGridDirection> Dir);
+
+	/** 지금 계속 걸으라고 지시받은 방향. */
+	TOptional<EGridDirection> GetHeldDirection() const { return HeldDirection; }
+
+	/**
+	 * 그 방향으로 한 칸만 걷는다. 이동 키를 한 번 눌렀다 뗀 것과 같다.
+	 *
+	 * 콘솔 명령(ltts.PawnStep)이 쓰는 시험용 입구다. 키보드와 정확히 같은 함수를 지나므로,
+	 * 이 명령이 통과했다는 것은 그 경로가 통과했다는 뜻이다.
+	 */
+	bool StepOnce(EGridDirection Dir);
 
 	FIntPoint GetCurrentCell() const { return CurrentCell; }
 	FIntPoint GetGoalCell() const { return GoalCell; }
@@ -149,6 +174,34 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
 	FRotator CameraRotation = FRotator(-35.264f, -135.0f, 0.0f);
 
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	/**
+	 * 폰을 따라다니는 스프링암 카메라를 쓸지. 기본은 꺼짐.
+	 *
+	 * 2026-09-14부터 시점은 구역마다 놓은 고정 카메라(AStageInfo::ZoneCameras)가 맡는다. 이 카메라는
+	 * 지우지 않고 꺼 두기만 했다: 구역 카메라를 배치하지 않은 맵을 디버그할 때 다시 켜서 쓴다.
+	 * 켜져 있으면 구역 카메라보다 우선해서 폰을 따라간다.
+	 *
+	 * 켜는 법(둘 중 하나라도 켜지면 켜진다):
+	 *   - 플레이 중 콘솔 `ltts.PawnCamera 1` (끄려면 0). 에디터를 끄기 전까지 다음 PIE에도 유지된다.
+	 *   - 이 값을 true로. 폰이 C++ 기본 폰이라 지금은 이 줄의 기본값을 바꿔야 한다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
+	bool bUsePawnCamera = false;
+
+	/** bUsePawnCamera 또는 콘솔 변수 ltts.PawnCamera가 폰 카메라를 요구하는지. */
+	bool ShouldUsePawnCamera() const;
+
+	/** 폰 카메라 컴포넌트가 지금 켜져 있는지. 꺼져 있으면 폰이 뷰 타깃이어도 이 카메라로 보지 않는다. */
+	bool IsPawnCameraActive() const;
+
+	/**
+	 * 폰 카메라 컴포넌트를 켜고 끈다. 뷰 타깃은 바꾸지 않는다.
+	 *
+	 * 시점을 실제로 옮기는 일은 AGridPlayerController가 한다(구역 카메라 ↔ 폰 보간).
+	 */
+	void SetPawnCameraActive(bool bActive);
+
 	/** 부딪힘 연출에서 막힌 쪽으로 나갔다 오는 거리(cm). */
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Feedback", meta = (ClampMin = 0.0))
 	float BumpDistance = 15.0f;
@@ -179,6 +232,15 @@ private:
 	/** 그리드 위 한 셀씩 걷는 기존 루프. */
 	void TickGridStep(float DeltaSeconds);
 
+	/**
+	 * 지시받은 방향으로 한 칸 나아가려 한다. 경로 한 칸을 세워 두면 성공이다.
+	 *
+	 * 길찾기를 거치지 않는 이유는 키가 가리키는 방향이 곧 명령이기 때문이다. 막혔으면
+	 * 돌아가는 길을 찾는 대신 그 자리에 선다 -- 키보드 조작에서 폰이 제멋대로 우회하면
+	 * 플레이어가 폰을 미는 감각이 사라진다.
+	 */
+	bool TryStepHeldDirection();
+
 	UPROPERTY(Transient)
 	TObjectPtr<AGridActor> Grid;
 
@@ -187,6 +249,16 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn")
 	TObjectPtr<UStaticMeshComponent> BodyMesh;
+
+	/**
+	 * 구역 볼륨 감지용 프로브. 오직 StageZone 채널에만 Overlap으로 응답한다.
+	 *
+	 * 몸체 Sphere(반지름 BallRadius)를 쓰지 않는 이유: 50 cm 공으로 재면 구역이 반 칸 일찍 바뀌고,
+	 * 셀 경계에 맞춘 박스와 표면이 맞닿아 EndOverlap이 늦게 올 수 있다. 중심의 작은 구체는 "폰이
+	 * 경계를 넘는 순간"에 바뀌고, UStageSubsystem의 레벨 시작 점 판정과도 결과가 같다.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn")
+	TObjectPtr<USphereComponent> ZoneProbe;
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid Pawn|Camera")
 	TObjectPtr<USpringArmComponent> SpringArm;
@@ -202,6 +274,16 @@ private:
 
 	/** 스텝 도중에 받은 클릭; 폰이 다시 셀에 정렬되면 재계획한다. */
 	TOptional<FIntPoint> PendingGoal;
+
+	/** 누르고 있는 이동 키의 방향 (SetHeldDirection). 비어 있으면 다음 셀에서 멈춘다. */
+	TOptional<EGridDirection> HeldDirection;
+
+	/**
+	 * 지금 방향이 막혔다고 이미 알렸는지.
+	 *
+	 * 키를 누르고 있는 동안 매 틱 같은 줄을 다시 쓰지 않기 위해서다. 방향이 바뀌면 지운다.
+	 */
+	bool bHeldDirectionBlockedReported = false;
 
 	// ---------------------------------------------------------------- 탑승 상태
 

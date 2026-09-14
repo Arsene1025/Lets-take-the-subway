@@ -13,7 +13,7 @@
 
 | 기획 항목 | 상태 | 근거 |
 |---|---|---|
-| 이동 가능한 장애물 (X/Y 직선 드래그, 회전 불가) | **있음** | `APuzzleBlock`, 드래그 한 번에 한 칸 |
+| 이동 가능한 장애물 (X/Y 직선 드래그, 회전 불가) | **있음** | `APuzzleBlock`, 뗄 때까지 연속 드래그 (`ContinuousDragAndWASD.md`) |
 | 이동 불가능한 장애물 (개찰구 포함) | **있음** | `AGridBoxMarker` Blocked, 그리드 클리어런스 |
 | 엘리베이터 수평 이동 (문 축으로만 드래그) | **있음** | `APuzzleElevatorBlock` |
 | 엘리베이터 회전판 (올리면 자동 90도) | **있음** | `APuzzleRotationTile` |
