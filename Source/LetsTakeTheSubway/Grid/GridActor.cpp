@@ -39,6 +39,13 @@ AGridActor::AGridActor()
 
 	DebugDrawComponent = CreateDefaultSubobject<UGridDebugDrawComponent>(TEXT("GridDebugDraw"));
 	DebugDrawComponent->SetupAttachment(SceneRoot);
+
+#if WITH_EDITORONLY_DATA
+	// 뷰포트에서 끌리지 않게 잠근다(Lock Actor Movement). 아트가 역 구조물을 박스 선택으로
+	// 옮길 때 그리드 원점이 같이 끌려가 좌표가 어긋난 사고가 있었다(2026-09-14 노선 연장).
+	// 옮겨야 하면 액터 우클릭 > Transform > Lock Actor Movement를 끄거나 디테일 패널에 값을 넣는다.
+	bLockLocation = true;
+#endif
 }
 
 // ---------------------------------------------------------------------------- 변환

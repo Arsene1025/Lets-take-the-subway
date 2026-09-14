@@ -35,6 +35,13 @@ AGridTrain::AGridTrain()
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
 
+#if WITH_EDITORONLY_DATA
+	// 뷰포트에서 끌리지 않게 잠근다(Lock Actor Movement). 아트가 역 구조물을 박스 선택으로
+	// 옮길 때 열차가 같이 끌려가 좌표가 어긋난 사고가 있었다(2026-09-14 노선 연장).
+	// 옮겨야 하면 액터 우클릭 > Transform > Lock Actor Movement를 끄거나 디테일 패널에 값을 넣는다.
+	bLockLocation = true;
+#endif
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BodyFinder(
 		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_Movable.MI_GreyBox_Movable"));
@@ -147,6 +154,10 @@ void AGridTrain::ComputeBoardingCells(int32 StopIndex, TArray<FIntPoint>& OutCel
 	// 문은 승강장 쪽(로컬 +Y) 면에 있다. 차체 반폭 바깥으로 한 칸 나가야 승강장 셀이다.
 	const double SideOffset = BodyWidth * 0.5 + CellSize * 0.75;
 
+	// 선로 높이. BeginPlay 전(에디터 미리보기)에는 TrackZ가 아직 없으므로 배치 Z를 쓴다.
+	const double RailZ = HasActorBegunPlay() ? TrackZ : GetActorLocation().Z;
+	const int32 SearchCells = FMath::Max(1, BoardingSearchCells);
+
 	for (const float Offset : Offsets)
 	{
 		// 문 폭에 걸치는 셀을 모두 넣는다. 문 하나가 셀 두 칸에 걸쳐 있으면 어느 쪽에
@@ -158,23 +169,27 @@ void AGridTrain::ComputeBoardingCells(int32 StopIndex, TArray<FIntPoint>& OutCel
 		{
 			const double Along = Offset - Half + (Half * 2.0) * Sample / (Samples - 1);
 
-			// 승강장이 차체에서 한 칸 더 떨어져 있을 수도 있다. 걸을 수 있는 셀이 나올
-			// 때까지 바깥으로 한 칸씩 두 번까지 더 본다.
-			for (int32 Step = 0; Step < 3; ++Step)
+			// 승강장이 차체에서 몇 칸 떨어져 있을 수도 있다(턱이나 틈). 선로 높이 근처의
+			// 걸을 수 있는 셀이 나올 때까지 바깥으로 BoardingSearchCells칸까지 본다.
+			for (int32 Step = 0; Step < SearchCells; ++Step)
 			{
 				const FVector Local(Along, SideOffset + Step * CellSize, 0.0);
 				const FIntPoint Cell = Grid->WorldToCell(StopLocation + Rotation.RotateVector(Local));
 
-				if (!Grid->IsValidCell(Cell))
+				if (!Grid->IsValidCell(Cell) || !Grid->IsCellWalkableStatic(Cell))
 				{
 					continue;
 				}
 
-				if (Grid->IsCellWalkableStatic(Cell))
+				// 걸을 수는 있어도 승강장보다 한참 낮은 턱이면 건너뛰고 더 바깥을 본다.
+				if (BoardingFloorTolerance > 0.0f
+					&& FMath::Abs(Grid->CellToWorld(Cell).Z - RailZ) > BoardingFloorTolerance)
 				{
-					OutCells.AddUnique(Cell);
-					break;
+					continue;
 				}
+
+				OutCells.AddUnique(Cell);
+				break;
 			}
 		}
 	}
