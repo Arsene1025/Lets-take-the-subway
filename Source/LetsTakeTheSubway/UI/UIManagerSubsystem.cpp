@@ -131,7 +131,14 @@ void UUIManagerSubsystem::ShowGuidePopUpUI(EGuideType guide)
     const UUISettings* Settings = GetDefault<UUISettings>();
 
     if (UUserWidget* W = GetOrCreateWidget(GuidePopUpUIWidget, Settings->GuidePopUpUIWidget))
+    {
         W->SetVisibility(ESlateVisibility::Visible);
+
+        if (W->GetClass()->ImplementsInterface(UUIInitializable::StaticClass()))
+        {
+            IUIInitializable::Execute_InitializeInt(W, 0);
+        }
+    }
 }
 
 void UUIManagerSubsystem::ShowAlertUI(FText message)
@@ -139,7 +146,14 @@ void UUIManagerSubsystem::ShowAlertUI(FText message)
     const UUISettings* Settings = GetDefault<UUISettings>();
 
     if (UUserWidget* W = GetOrCreateWidget(AlertUIWidget, Settings->AlertUIWidget))
+    {
         W->SetVisibility(ESlateVisibility::Visible);
+
+        if (W->GetClass()->ImplementsInterface(UUIInitializable::StaticClass()))
+        {
+            IUIInitializable::Execute_Initialize(W);
+        }
+    }
 }
 
 #pragma endregion
