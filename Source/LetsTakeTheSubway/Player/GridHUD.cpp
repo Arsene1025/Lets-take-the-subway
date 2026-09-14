@@ -8,6 +8,12 @@
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Stage/StageSubsystem.h"
+#include "Stage/StageZoneVolume.h"
+
+#include "Camera/PlayerCameraManager.h"
+#include "Components/BoxComponent.h"
+#include "DrawDebugHelpers.h"
 
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
@@ -115,6 +121,72 @@ void AGridHUD::DrawHUD()
 		}
 
 		DrawText(Status, Label, X, Y);
+		Y += LineHeight;
+	}
+
+	// 스테이지·구역. UI 매니저가 받는 값과 같은 스냅샷이다.
+	if (const UStageSubsystem* Stage = UStageSubsystem::Get(this))
+	{
+		const FStageState& StageState = Stage->GetState();
+		const FString StageText = StageState.bResolved
+			? FString::Printf(TEXT("Stage %d '%s'   zone %d / %d '%s'"),
+				StageState.StageIndex, *StageState.StageName.ToString(),
+				StageState.CurrentZoneIndex, StageState.ZoneCount, *StageState.CurrentZoneName.ToString())
+			: FString(TEXT("Stage [unresolved]"));
+		DrawText(StageText, Value, X, Y);
+		Y += LineHeight;
+
+		// 레벨 2에서는 구역 박스를 그린다. 현재 구역은 초록, 나머지는 회색. 매 프레임 한 프레임짜리로 그린다.
+		if (LTTSGridDebug::ShouldDrawWorld())
+		{
+			const AStageZoneVolume* Current = Stage->GetCurrentZone();
+			for (const TWeakObjectPtr<AStageZoneVolume>& Entry : Stage->GetZones())
+			{
+				const AStageZoneVolume* Zone = Entry.Get();
+				const UBoxComponent* ZoneBox = Zone ? Zone->GetBox() : nullptr;
+				if (!ZoneBox)
+				{
+					continue;
+				}
+
+				const bool bIsCurrent = Zone == Current;
+				DrawDebugBox(GetWorld(), ZoneBox->GetComponentLocation(), ZoneBox->GetScaledBoxExtent(),
+					ZoneBox->GetComponentQuat(), bIsCurrent ? FColor::Green : FColor(140, 140, 140),
+					false, -1.0f, 0, bIsCurrent ? 6.0f : 2.0f);
+			}
+		}
+	}
+
+	// 지금 시점을 맡은 대상. 구역 카메라, 보간 중인지, 폰 디버그 카메라인지.
+	if (GridController)
+	{
+		const APlayerCameraManager* CameraManager = GridController->PlayerCameraManager;
+		const AActor* ViewTarget = GridController->GetViewTarget();
+		const AActor* PendingTarget = CameraManager ? CameraManager->PendingViewTarget.Target.Get() : nullptr;
+
+		FString ViewText = FString::Printf(TEXT("View %s"), ViewTarget ? *ViewTarget->GetActorNameOrLabel() : TEXT("none"));
+		if (PendingTarget)
+		{
+			ViewText += FString::Printf(TEXT(" -> %s [blending]"), *PendingTarget->GetActorNameOrLabel());
+		}
+
+		FLinearColor ViewColor = Label;
+		if (GridPawn && GridPawn->IsPawnCameraActive())
+		{
+			// --- PAWN CAMERA DISABLED 2026-09-14 ---
+			// 스위치로 강제한 것인지, 구역 카메라가 없어 자동으로 켜진 것인지 구분한다.
+			ViewText += GridPawn->ShouldUsePawnCamera()
+				? TEXT("   [pawn debug camera: ltts.PawnCamera 0 to turn off]")
+				: TEXT("   [pawn camera: no zone cameras in this level]");
+		}
+		else if (GridPawn && ViewTarget == GridPawn && !PendingTarget)
+		{
+			// 폰이 뷰 타깃인데 폰 카메라가 꺼져 있으면 공 안에서 수평으로 보는 이상한 시점이 된다.
+			ViewText += TEXT("   [no zone camera and pawn camera off: ltts.PawnCamera 1]");
+			ViewColor = FLinearColor(1.0f, 0.35f, 0.3f);
+		}
+
+		DrawText(ViewText, ViewColor, X, Y);
 		Y += LineHeight;
 	}
 
