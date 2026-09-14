@@ -54,6 +54,9 @@ public:
 	 *
 	 * 비어 있는 칸의 구역에 들어가면 시점을 바꾸지 않고 직전 카메라를 유지한다(경고 로그).
 	 * 폰을 따라가는 디버그 카메라(ltts.PawnCamera 1)가 켜져 있으면 이 배열보다 우선한다.
+	 *
+	 * 배열이 통째로 비어 있으면 폰을 따라가는 스프링암 카메라가 시점을 맡는다(2026-09-14). 고정 카메라를
+	 * 두지 않는 스테이지(예: Subway_Stage2)는 비워 두면 된다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage Info|Camera")
 	TArray<TObjectPtr<ACameraActor>> ZoneCameras;

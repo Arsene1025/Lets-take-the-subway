@@ -173,7 +173,11 @@ void AGridHUD::DrawHUD()
 		FLinearColor ViewColor = Label;
 		if (GridPawn && GridPawn->IsPawnCameraActive())
 		{
-			ViewText += TEXT("   [pawn debug camera: ltts.PawnCamera 0 to turn off]");
+			// --- PAWN CAMERA DISABLED 2026-09-14 ---
+			// 스위치로 강제한 것인지, 구역 카메라가 없어 자동으로 켜진 것인지 구분한다.
+			ViewText += GridPawn->ShouldUsePawnCamera()
+				? TEXT("   [pawn debug camera: ltts.PawnCamera 0 to turn off]")
+				: TEXT("   [pawn camera: no zone cameras in this level]");
 		}
 		else if (GridPawn && ViewTarget == GridPawn && !PendingTarget)
 		{
