@@ -7,7 +7,12 @@
 		{
 			"Name": "LetsTakeTheSubway",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"DeveloperSettings",
+				"CoreUObject"
+			]
 		}
 	],
 	"Plugins": [
