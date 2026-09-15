@@ -12,4 +12,6 @@ enum class EGuideType : uint8
     Stage1_1    UMETA(DisplayName = "Stage1_1"),
     Stage1_2    UMETA(DisplayName = "Stage1_2"),
     Stage2_1    UMETA(DisplayName = "Stage2_1"),
+
+    MAXVALUE    UMETA(DisplayName = "MAXVALUE"),
 };
