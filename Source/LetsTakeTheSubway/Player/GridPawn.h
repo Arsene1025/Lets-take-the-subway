@@ -174,6 +174,38 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
 	FRotator CameraRotation = FRotator(-35.264f, -135.0f, 0.0f);
 
+	// --- PAWN CAMERA DISABLED 2026-09-14 ---
+	/**
+	 * 폰을 따라다니는 스프링암 카메라를 쓸지. 기본은 꺼짐.
+	 *
+	 * 2026-09-14부터 시점은 구역마다 놓은 고정 카메라(AStageInfo::ZoneCameras)가 맡는다. 이 카메라는
+	 * 지우지 않고 꺼 두기만 했다: 구역 카메라를 배치하지 않은 맵을 디버그할 때 다시 켜서 쓴다.
+	 * 켜져 있으면 구역 카메라보다 우선해서 폰을 따라간다.
+	 *
+	 * 켜는 법(둘 중 하나라도 켜지면 켜진다):
+	 *   - 플레이 중 콘솔 `ltts.PawnCamera 1` (끄려면 0). 에디터를 끄기 전까지 다음 PIE에도 유지된다.
+	 *   - 이 값을 true로. 폰이 C++ 기본 폰이라 지금은 이 줄의 기본값을 바꿔야 한다.
+	 *
+	 * 구역 카메라가 없는 레벨(StageInfo가 없거나 ZoneCameras가 빈 레벨, 예: Subway_Stage2)은 이 스위치와
+	 * 상관없이 컨트롤러가 이 카메라를 자동으로 켠다(AGridPlayerController::ShouldFollowPawn, 2026-09-14).
+	 * 이 스위치는 구역 카메라가 있는 맵에서 강제로 폰을 따라갈 때만 필요하다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Camera")
+	bool bUsePawnCamera = false;
+
+	/** bUsePawnCamera 또는 콘솔 변수 ltts.PawnCamera가 폰 카메라를 요구하는지. */
+	bool ShouldUsePawnCamera() const;
+
+	/** 폰 카메라 컴포넌트가 지금 켜져 있는지. 꺼져 있으면 폰이 뷰 타깃이어도 이 카메라로 보지 않는다. */
+	bool IsPawnCameraActive() const;
+
+	/**
+	 * 폰 카메라 컴포넌트를 켜고 끈다. 뷰 타깃은 바꾸지 않는다.
+	 *
+	 * 시점을 실제로 옮기는 일은 AGridPlayerController가 한다(구역 카메라 ↔ 폰 보간).
+	 */
+	void SetPawnCameraActive(bool bActive);
+
 	/** 부딪힘 연출에서 막힌 쪽으로 나갔다 오는 거리(cm). */
 	UPROPERTY(EditAnywhere, Category = "Grid Pawn|Feedback", meta = (ClampMin = 0.0))
 	float BumpDistance = 15.0f;

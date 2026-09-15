@@ -184,6 +184,7 @@
     <li><a href="#lifecycle">생명주기와 방송 시점</a></li>
     <li><a href="#debug">검증과 디버그</a></li>
     <li><a href="#faq">레벨 전환 시 관리 (FAQ)</a></li>
+    <li><a href="#camera">구역 카메라 전환</a></li>
   </ol>
 </nav>
 
@@ -497,8 +498,9 @@ void UUIManagerSubsystem::HandleStageZoneChanged(int32 PrevZoneIndex, int32 NewZ
   <li><b>배치 액터 컴포넌트 초기화</b><span>볼륨의 오버랩 핸들러 바인딩 (<code>PostInitializeComponents</code>)</span></li>
   <li class="key"><b>플레이어 컨트롤러 스폰</b><span>UI 매니저의 <code>PlayerControllerChanged</code> 호출. 여기서 바인딩. 상태는 아직 <code>bResolved = false</code></span></li>
   <li><b>폰 스폰</b><span>첫 오버랩이 계산되지만 볼륨이 아직 등록 전이라 신뢰하지 않음</span></li>
-  <li><b>모든 액터 BeginPlay</b><span><code>AStageInfo</code>, 볼륨이 서브시스템에 등록. 폰이 셀에 정렬</span></li>
-  <li class="key"><b>OnWorldBeginPlay</b><span>폰 위치로 시작 구역을 다시 판정하고 저작 오류를 검사한 뒤, 두 델리게이트를 1회 방송</span></li>
+  <li><b>서브시스템 OnWorldBeginPlay</b><span>판정 예약만 한다. 이 시점에는 액터 BeginPlay 전이라 등록부가 비어 있음</span></li>
+  <li><b>모든 액터 BeginPlay</b><span><code>AStageInfo</code>, 볼륨이 서브시스템에 등록. 폰이 셀에 정렬. 컨트롤러가 델리게이트에 바인딩</span></li>
+  <li class="key"><b>UWorld::OnWorldBeginPlay 방송</b><span>폰 위치로 시작 구역을 판정하고 저작 오류를 검사한 뒤, 두 델리게이트를 1회 방송. 컨트롤러가 첫 구역 카메라에 즉시 붙음</span></li>
   <li><b>플레이 중</b><span>볼륨 오버랩마다 판정, 바뀐 경우에만 방송</span></li>
   <li><b>레벨 종료</b><span>월드 정리 중 발생하는 EndOverlap은 무시. 서브시스템이 델리게이트를 비우고 사라짐</span></li>
 </ul>
@@ -508,7 +510,9 @@ void UUIManagerSubsystem::HandleStageZoneChanged(int32 PrevZoneIndex, int32 NewZ
 
 <h3>콘솔</h3>
 <pre><code>ltts.GridDebug 1    // HUD에 "Stage 1 'Name'   zone 2 / 5 'Zone'" 줄 표시
-ltts.GridDebug 2    // 추가로 구역 박스를 월드에 그림 (현재 구역 초록, 나머지 회색)</code></pre>
+ltts.GridDebug 2    // 추가로 구역 박스를 월드에 그림 (현재 구역 초록, 나머지 회색)
+ltts.ZoneCamera 3   // 걷지 않고 구역 3 카메라로 보간 (ltts.ZoneCamera 3 0 이면 즉시)
+ltts.PawnCamera 1   // 폰을 따라가는 디버그 카메라 켜기 (0이면 끄고 구역 카메라로 복귀)</code></pre>
 
 <h3>로그 (카테고리 LogLTTSGrid)</h3>
 <div class="table-wrap"><table>
@@ -564,10 +568,59 @@ ltts.GridDebug 2    // 추가로 구역 박스를 월드에 그림 (현재 구�
 <h3>Q. 새 스테이지 레벨(예: Subway_Stage2)을 만들면 무엇을 해야 하나요?</h3>
 <ol>
   <li>Stage Info를 놓고 Stage Index를 2로 합니다.</li>
-  <li>구역 볼륨을 1번부터 놓고 Zone Count를 맞춥니다.</li>
+  <li>구역 볼륨을 1번부터 놓고 Zone Count를 맞춥니다. 구역을 나누지 않는 스테이지는 볼륨 없이 두어도 됩니다(현재 구역은 0).</li>
+  <li>고정 카메라를 쓰면 Zone Cameras에 구역 순서대로 넣습니다. 비워 두면 폰을 따라가는 카메라가 됩니다.</li>
   <li>플레이해서 시작 로그에 경고가 없는지 봅니다.</li>
 </ol>
 <p>코드나 설정 변경은 필요 없습니다.</p>
+
+
+<!-- ============================================================== -->
+<h2 id="camera">11. 구역 카메라 전환</h2>
+
+<p>플레이어가 구역을 옮기면 시점이 그 구역의 고정 카메라로 옮겨 갑니다. 순간이동이 아니라 지금 보이는 시점에서 다음 카메라까지 위치, 회전, 직교 폭을 정해진 시간 동안 보간합니다. 보간은 엔진의 <code>SetViewTargetWithBlend</code>가 하고, 호출은 <code>AGridPlayerController</code>가 합니다.</p>
+
+<h3>설정 (StageInfo 디테일 패널 › Stage Info › Camera)</h3>
+<div class="table-wrap"><table>
+  <tr><th>속성</th><th>설명</th><th>Subway_Stage1 값</th></tr>
+  <tr><td>Zone Cameras</td><td>구역 순서대로 카메라 액터. 0번 칸이 구역 1</td><td>CAM_Isometric1, 2, 3, 4</td></tr>
+  <tr><td>Camera Blend Time</td><td>시점이 옮겨 가는 시간(초). 0이면 즉시</td><td>1.0</td></tr>
+  <tr><td>Camera Blend Function</td><td>보간 곡선. Linear는 일정한 속도, EaseInOut은 출발과 도착이 부드러움</td><td>Linear</td></tr>
+</table></div>
+
+<div class="callout warn">
+  <p><strong>카메라 액터의 Auto Activate For Player는 Disabled로 두세요.</strong> 켜져 있으면 레벨 시작 때 엔진이 그 카메라를 먼저 잡습니다. 시작 로그에 경고가 나옵니다.</p>
+</div>
+
+<h3>동작 규칙</h3>
+<div class="table-wrap"><table>
+  <tr><th>상황</th><th>시점</th></tr>
+  <tr><td>레벨 시작</td><td>시작 구역 카메라에 보간 없이 곧바로 붙음</td></tr>
+  <tr><td>구역 이동</td><td>새 구역 카메라로 Camera Blend Time 동안 보간</td></tr>
+  <tr><td>보간 도중 다시 구역 이동 (되돌아가기 포함)</td><td>지금 보이는 위치에서 새 목표로 이어서 이동. 튀지 않음</td></tr>
+  <tr><td>Zone Cameras 칸이 비어 있는 구역</td><td>직전 카메라 유지, 경고 로그</td></tr>
+  <tr><td>StageInfo가 없거나 Zone Cameras가 통째로 빈 맵 (예: Subway_Stage2)</td><td>폰을 따라가는 스프링암 카메라로 자동 전환. 레벨 시작부터 폰 시점이며 <code>ltts.PawnCamera</code>는 필요 없음. 시작 로그 <code>view follows the pawn (no zone cameras in this level)</code></td></tr>
+  <tr><td>보간 중 이동 키</td><td>막지 않음. 네 카메라의 방향이 같아 WASD 방향도 그대로</td></tr>
+</table></div>
+
+<h3>폰을 따라가는 카메라</h3>
+<p>폰 스프링암 카메라는 지우지 않고 기본으로 꺼 두었습니다. 구역 카메라가 하나도 없는 맵에서는 컨트롤러가 자동으로 켭니다(<code>AGridPlayerController::ShouldFollowPawn</code>). 고정 카메라를 두지 않는 스테이지는 Stage Info의 Zone Cameras를 비워 두기만 하면 됩니다.</p>
+<p>아래 스위치는 구역 카메라가 <b>있는</b> 맵에서 강제로 폰을 따라가게 할 때만 씁니다. 켜져 있으면 구역 카메라보다 우선합니다.</p>
+<ul>
+  <li><b>플레이 중 켜기:</b> 콘솔에 <code>ltts.PawnCamera 1</code>. 끄면 현재 구역 카메라로 보간해 돌아갑니다. 에디터를 끄기 전까지 다음 PIE에도 유지됩니다.</li>
+  <li><b>항상 켜기:</b> <code>AGridPawn::bUsePawnCamera</code> 기본값을 true로 바꿉니다. 코드에서 <code>PAWN CAMERA DISABLED 2026-09-14</code>로 검색하면 관련 지점이 모두 나옵니다.</li>
+</ul>
+
+<h3>블루프린트와 C++에서 직접 부르기</h3>
+<div class="table-wrap"><table>
+  <tr><th>멤버</th><th>설명</th></tr>
+  <tr><td><code>AGridPlayerController::BlendToZoneCamera(ZoneIndex, BlendTime = -1)</code></td><td>그 구역 카메라로 보간. BlendTime 음수면 StageInfo 값</td></tr>
+  <tr><td><code>AGridPlayerController::IsBlendingView()</code></td><td>시점이 옮겨 가는 중인지</td></tr>
+  <tr><td><code>AGridPlayerController::HasZoneCameras()</code></td><td>이 레벨에 구역 카메라가 하나라도 있는지. 레벨 시작 판정 전에는 true</td></tr>
+  <tr><td><code>AGridPlayerController::ShouldFollowPawn()</code></td><td>시점이 폰을 따라가야 하는지. 디버그 스위치가 켜졌거나 구역 카메라가 없는 레벨이면 true</td></tr>
+  <tr><td><code>AStageInfo::GetZoneCamera(ZoneIndex)</code></td><td>구역 번호(1부터)의 카메라. 없으면 null</td></tr>
+  <tr><td><code>UStageSubsystem::GetStageInfo()</code></td><td>레벨의 StageInfo 액터</td></tr>
+</table></div>
 
 </div>
 </body>

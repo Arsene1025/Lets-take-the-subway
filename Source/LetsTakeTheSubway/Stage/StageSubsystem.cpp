@@ -7,6 +7,7 @@
 #include "Stage/StageInfo.h"
 #include "Stage/StageZoneVolume.h"
 
+#include "Camera/CameraActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -47,8 +48,15 @@ void UStageSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	// 이 시점에는 배치된 액터가 전부 BeginPlay를 마쳐 등록돼 있고, 플레이어 폰도 스폰과 빙의가 끝났다.
-	ResolveInitialZone();
+	// 여기서 곧바로 판정하면 안 된다. UE 5.8의 UWorld::BeginPlay 순서는
+	//   1) 월드 서브시스템 OnWorldBeginPlay (지금 여기)
+	//   2) GameMode::StartPlay -> 모든 액터 BeginPlay (볼륨·StageInfo 등록, 폰 셀 정렬, 컨트롤러 바인딩)
+	//   3) UWorld::OnWorldBeginPlay 방송
+	// 이라서, 이 시점에는 등록부가 비어 있다. 액터 BeginPlay가 전부 끝난 3)에 판정을 건다.
+	InWorld.OnWorldBeginPlay.AddWeakLambda(this, [this]()
+	{
+		ResolveInitialZone();
+	});
 }
 
 void UStageSubsystem::Deinitialize()
@@ -113,7 +121,7 @@ void UStageSubsystem::RegisterInfo(AStageInfo* Info)
 	{
 		UE_LOG(LogLTTSGrid, Warning,
 			TEXT("%s: this level has %d AStageInfo actors. Only the first one (%s) is used."),
-			*Info->GetName(), Infos.Num(), *GetNameSafe(GetInfo()));
+			*Info->GetName(), Infos.Num(), *GetNameSafe(GetStageInfo()));
 	}
 
 	if (bResolved)
@@ -220,11 +228,53 @@ void UStageSubsystem::ResolveInitialZone()
 
 void UStageSubsystem::ValidateLayout() const
 {
-	const AStageInfo* Info = GetInfo();
+	const AStageInfo* Info = GetStageInfo();
 	if (!Info)
 	{
 		UE_LOG(LogLTTSGrid, Warning,
-			TEXT("StageSubsystem: this level has no AStageInfo. Stage index is 0; place one and set StageIndex."));
+			TEXT("StageSubsystem: this level has no AStageInfo. Stage index is 0; place one and set StageIndex. The view follows the pawn."));
+	}
+	else
+	{
+		// 구역 카메라. 빠진 칸은 막지 않는다: 그 구역에서는 직전 시점이 유지된다.
+		const int32 NumZones = ComputeZoneCount(Info);
+		if (Info->ZoneCameras.IsEmpty())
+		{
+			// --- PAWN CAMERA DISABLED 2026-09-14 ---
+			// 저작 실수가 아니라 "고정 카메라를 쓰지 않는 스테이지"라는 뜻이다. 컨트롤러가 폰 카메라를 켠다.
+			UE_LOG(LogLTTSGrid, Display,
+				TEXT("StageSubsystem: %s has no ZoneCameras; the view follows the pawn's spring-arm camera. Fill ZoneCameras (one per zone) to use fixed cameras."),
+				*Info->GetName());
+		}
+		else
+		{
+			for (int32 Zone = 1; Zone <= NumZones; ++Zone)
+			{
+				if (!Info->GetZoneCamera(Zone))
+				{
+					UE_LOG(LogLTTSGrid, Warning,
+						TEXT("StageSubsystem: %s has no camera for zone %d (ZoneCameras[%d]). Entering that zone keeps the previous view."),
+						*Info->GetName(), Zone, Zone - 1);
+				}
+			}
+
+			if (NumZones > 0 && Info->ZoneCameras.Num() > NumZones)
+			{
+				UE_LOG(LogLTTSGrid, Display,
+					TEXT("StageSubsystem: %s lists %d cameras for %d zones; the extra ones are never used."),
+					*Info->GetName(), Info->ZoneCameras.Num(), NumZones);
+			}
+		}
+
+		for (const TObjectPtr<ACameraActor>& Camera : Info->ZoneCameras)
+		{
+			if (Camera && Camera->GetAutoActivatePlayerIndex() != INDEX_NONE)
+			{
+				UE_LOG(LogLTTSGrid, Warning,
+					TEXT("StageSubsystem: zone camera %s has AutoActivateForPlayer set. Set it to Disabled, or the engine may grab it as the view at level start."),
+					*Camera->GetActorNameOrLabel());
+			}
+		}
 	}
 
 	if (Zones.IsEmpty())
@@ -277,7 +327,7 @@ void UStageSubsystem::RefreshState(bool bInitialBroadcast)
 	FStageState Next;
 	Next.bResolved = bResolved;
 
-	const AStageInfo* Info = GetInfo();
+	const AStageInfo* Info = GetStageInfo();
 	if (Info)
 	{
 		Next.StageIndex = Info->StageIndex;
@@ -318,7 +368,7 @@ void UStageSubsystem::RefreshState(bool bInitialBroadcast)
 	}
 }
 
-AStageInfo* UStageSubsystem::GetInfo() const
+AStageInfo* UStageSubsystem::GetStageInfo() const
 {
 	for (const TWeakObjectPtr<AStageInfo>& Entry : Infos)
 	{

@@ -16,6 +16,14 @@ AStageZoneVolume::AStageZoneVolume()
 	Box = CreateDefaultSubobject<UBoxComponent>(TEXT("Box"));
 	SetRootComponent(Box);
 
+	// 뷰포트에서 끌리지 않게 잠근다(Lock Actor Movement). 아트가 역 구조물을 박스 선택으로
+	// 옮길 때 구역 볼륨이 같이 끌려가 좌표가 어긋난 사고가 있었다(2026-09-14 노선 연장).
+	// 옮겨야 하면 액터 우클릭 > Transform > Lock Actor Movement를 끄거나 디테일 패널에 값을 넣는다.
+	// 2026-09-15: 구역 조정 단계라 잠금을 잠시 끈다. 구역 배치가 확정되면 다시 켠다.
+// #if WITH_EDITORONLY_DATA
+// 	bLockLocation = true;
+// #endif
+
 	// 2 x 2 셀, 높이 3 m. 배치한 뒤 Box Extent로 구역에 맞춘다.
 	Box->InitBoxExtent(FVector(100.0, 100.0, 150.0));
 
