@@ -197,8 +197,7 @@ float UUIManagerSubsystem::GetMasterVolume() const
 
 void UUIManagerSubsystem::ApplyMasterVolume(float Volume01)
 {
-    // 슬라이더 값 그대로 선형 볼륨으로 쓴다. 낮은 구간이 너무 급하게 들리면 여기서만
-    // Volume01 * Volume01로 바꾸면 되고, 저장값과 슬라이더 위치는 흔들리지 않는다.
+    //슿라이더 값 적용.
     if (UGameSoundSubsystem* Sound = GetSoundSubsystem(GetLocalPlayer()))
     {
         Sound->SetMasterVolume(Volume01);
