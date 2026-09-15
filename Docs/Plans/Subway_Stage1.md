@@ -653,3 +653,33 @@ stepBreaks 153 (이전 4127 / 11849 / 14124 / 447 / 155).
 - [ ] 서쪽 B1 (54,186)에서 `DOWN_ST1`을 타고 B2 (67,186) 부근에 선다.
 - [ ] 경사 중간에서 공이 발판에 묻히거나 뜨지 않는지. 어긋나면 `RidePathLocal` [1]·[2]의 Y를 조정한다.
 - [ ] 자판기 2대(`BP_Block_VendingMachine`, `…2`)가 yaw 0에서 벽·기둥과 겹쳐 보이지 않는지.
+
+## 11. 장식·카메라·레일 정리 — ART_2 `f8b7b34` 병합 (2026-09-15)
+
+ART_2 커밋 6개(`8d8b53a`~`f8b7b34`). 병합 전후 두 맵을 커맨드렛(`-run=pythonscript`)으로 불러 액터 목록·트랜스폼·프로그래머
+액터 설정을 덤프해 비교했다.
+
+### 11.1 변경 요약
+
+| 구분 | 내용 | 판단 |
+|---|---|---|
+| Stage1 삭제 | `SM_Clock`·`SM_Clock2`·`SM_Clock3`, `SM_Abstract`·`SM_Abstract1~15` (장식 19개) | 아트("시계 오류난 에셋 삭제"). 조치 없음 |
+| Stage1 교체 | `BP_ESCALATOR_DOWN3`(클래스 `BP_ESCALATOR_DOWN`) → 같은 자리 `BP_ESCALATOR_DOWN_ST3`(클래스 `_ST1`) | **탑승 경로·클릭 상자가 빠져 있었다** → 11.2 |
+| Stage1 추가 | `SM_Wall05_Rail9/10`, `SM_B2_SignPanel4/5` (선로 서쪽) | 조치 없음 |
+| Stage1 메시 | 장식 기둥 `SM_Pillar_005`·`SM_Pillar_6` → `SM_Pillar_ab1_Clock`·`SM_Pillar_ab2_nClock` | 조치 없음 |
+| Stage1 이동 | 회전 기둥 7개 Y +2.45 cm(…97.55 → …00), `CAM_Isometric3·4` | 기둥 셀은 `MinCellFromCentre`의 25 cm 보정으로 전후 같은 셀(Y 200). 조치 없음 |
+| 두 맵 레일 | `BP_RailTrack` 인스턴스 전부 → `BP_RailTrack_ST1`, `SM_Rail` 수정 | 탑승 셀 수(Stage1 20, Stage2 16·18·19·19)와 에스컬레이터 탑승 칸이 병합 전과 같다 |
+| `BP_RotatingPillar_Station` | `ArtMesh` 컴포넌트 템플릿 메시만 `SM_Pillar_ab2_nClock`. `ArtMesh` 프로퍼티는 `SM_Pillar_005` 그대로 | `RefreshVisual`이 프로퍼티 값으로 덮으므로 **화면에는 여전히 `SM_Pillar_005`**. 시계 기둥을 원하면 아트가 `ArtMesh` 프로퍼티를 바꿔야 한다 |
+| `StationGrid` | 두 맵 모두 설정·`LastGenerated` 변화 없음 | |
+
+### 11.2 프로그래머 수정
+
+`BP_ESCALATOR_DOWN_ST3`의 `RidePathLocal`이 클래스 기본값 (−325,0,0)→(325,0,610)이었다. 10.2의 4대 공통 인스턴스 값을
+넣었다(같은 yaw 0인 `DOWN_ST2`에서 복사): 경로 (0,−1000,807)→(0,−702,820)→(0,−225,20)→(0,100,40), 클릭 상자 (0,−445,420)/(200,630,440).
+결과는 교체 전 `DOWN3`와 같다: `ride is 1555 cm long, boarding from 3 cell(s), first is (133,0)`(지상 입구라 여전히 탈 수 없음, 10.3).
+
+### 11.3 확인
+
+- 헤드리스 게임(`-game -nullrhi`)으로 두 맵 BeginPlay 로그를 받았다. Stage1 경고는 병합 전과 같고(`StageRailExtension.md` 5.4),
+  Stage2 경고(`PuzzleElevatorBlock_3` 그리드 밖, `BP_LEVER001_C_0` 대상 없음, `ZoneCount 8`)도 병합 전 PIE 로그에 이미 있었다.
+- 손으로: `CAM_Isometric3·4` 구도, 선로 서쪽 새 벽이 카메라를 가리지 않는지.
