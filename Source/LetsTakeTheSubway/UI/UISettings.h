@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "Blueprint/UserWidget.h"
+#include "Guide/GuideDatabase.h"
 #include "UISettings.generated.h"
 
 /**
@@ -28,5 +29,9 @@ public:
 
     UPROPERTY(Config, EditAnywhere, Category = "Screens")
     TSoftClassPtr<UUserWidget> AlertUIWidget;
+
+
+    UPROPERTY(Config, EditAnywhere, Category = "Data")
+    TSoftObjectPtr<UGuideDatabase> GuideDatabase;
 
 };

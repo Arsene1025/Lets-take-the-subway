@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
+#include "Guide/GuideType.h"
 #include "UIInitializable.generated.h"
 
 /**
@@ -28,6 +29,9 @@ public:
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
     void InitializeInt(int32 paramInt);
 
-    //UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
-    //void InitializeText(FText paramText);
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
+    void InitializeGuide(EGuideType paramGuide);
+
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI")
+    void InitializeText(const FText& paramText);
 };
