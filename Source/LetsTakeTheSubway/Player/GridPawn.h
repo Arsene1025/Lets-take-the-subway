@@ -118,8 +118,12 @@ public:
 	 * FollowComponent를 주면 액터 원점 대신 그 컴포넌트를 따라간다. 에스컬레이터처럼 액터
 	 * 자체는 가만히 있고 그 위의 한 점만 움직이는 탈것을 위한 것이다. 비워 두면 지금까지처럼
 	 * 탈것 액터의 원점을 따라간다.
+	 *
+	 * ApproachWorld를 주면 먼저 그 점까지 걸어간 뒤 좌석으로 들어간다. 열차가 폰을 문 한가운데와
+	 * 일직선이 되는 자리로 옮겨 세운 다음 똑바로 들여보낼 때 쓴다.
 	 */
-	void BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent = nullptr);
+	void BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent = nullptr,
+		const TOptional<FVector>& ApproachWorld = TOptional<FVector>());
 
 	/**
 	 * 탈것에서 내려 그리드로 걸어 나온다.
@@ -303,6 +307,13 @@ private:
 
 	/** Entering·Leaving에서 걸어갈 목표점. */
 	FVector WalkTarget = FVector::ZeroVector;
+
+	/**
+	 * Entering의 두 번째 목표(좌석). 비어 있지 않으면 지금 WalkTarget은 좌석 앞 경유점이다.
+	 *
+	 * 경유점에 닿으면 이 값으로 WalkTarget을 바꾸고 비운다.
+	 */
+	TOptional<FVector> PendingSeat;
 
 	/** Leaving이 끝나면 서게 될 셀. */
 	FIntPoint LandingCell = FIntPoint::ZeroValue;

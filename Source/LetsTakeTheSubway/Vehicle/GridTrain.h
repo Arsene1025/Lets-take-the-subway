@@ -10,8 +10,11 @@ class AGridActor;
 class AGridNPC;
 class AGridNPCSpawner;
 class AGridPawn;
+class UAnimSequenceBase;
+class UAnimationAsset;
 class UCurveFloat;
 class UMaterialInterface;
+class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
 /**
@@ -45,16 +48,22 @@ struct FGridTrainStop
 	TArray<FIntPoint> BoardingCells;
 
 	/**
-	 * 이 역에서 내릴 때 폰이 걸어 나갈 셀. 유효하지 않으면 문 앞 셀 중 하나를 쓴다.
+	 * 이 역에서 내린 폰이 향할 셀.
 	 *
-	 * 정확한 셀을 못 찾더라도 그리드가 근처에서 걸을 수 있는 셀을 찾아 준다
-	 * (AGridActor::FindEntryCell).
+	 * 폰은 언제나 **문 한가운데에서 문 앞 셀로** 똑바로 걸어 나온다. 이 셀이 문 앞 셀(이 역의
+	 * 탑승 셀) 가운데 하나면 거기로 나오고, 아니면 가장 가까운 문 앞 셀로 나온 뒤 PostExitCell이
+	 * 비어 있을 때 이 셀까지 마저 걸어간다. 예전에는 이 셀로 곧장 걸어 나왔는데, 승강장 가운데
+	 * 셀을 적어 둔 정차역에서는 폰이 차체 벽을 뚫고 비스듬히 나왔다(2026-09-15).
+	 *
+	 * 유효하지 않으면 문 앞 셀 가운데 폰에게 가장 가까운 칸으로 내린다. 정확한 셀을 못
+	 * 찾더라도 그리드가 근처에서 걸을 수 있는 셀을 찾아 준다(AGridActor::FindEntryCell).
 	 */
 	UPROPERTY(EditAnywhere, Category = "Train Stop")
 	FIntPoint ExitCell = FIntPoint(-1, -1);
 
 	/**
-	 * 내린 뒤 이어서 걸어갈 셀. 유효하지 않으면 내린 자리에 선다.
+	 * 내린 뒤 이어서 걸어갈 셀. 유효하지 않으면 ExitCell(문 앞 셀이 아닐 때)로, 그것도 없으면
+	 * 내린 자리에 선다.
 	 *
 	 * 기획의 "일정 위치까지 이동한 뒤 정지"다. 문 앞에서 바로 조작이 돌아오면 플레이어가
 	 * 자기가 어디에 내렸는지 알아차리기 전에 열차가 떠난다.
@@ -187,6 +196,52 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Train|Body")
 	TObjectPtr<UMaterialInterface> ArtFallbackMaterial;
 
+	// ---------------------------------------------------------------- 아트 애니메이션
+
+	/**
+	 * 문과 바퀴가 움직이는 아트 차체. 스켈레탈 메시는 블루프린트 기본값에서 지정한다.
+	 *
+	 * 메시가 비어 있으면(그레이박스 열차) 아래 애니메이션은 모두 아무것도 하지 않는다.
+	 * 콜리전은 없다. 커서가 잡는 것은 여전히 BodyMesh 프록시 상자다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Train|Art")
+	TObjectPtr<USkeletalMeshComponent> ArtMesh;
+
+	/**
+	 * 문이 열리는 애니메이션. 재생하지 않고 DoorsOpening 단계의 진행도에 맞춰 위치를 짚는다.
+	 *
+	 * 재생 대신 짚는 이유: 승하차를 막는 것은 단계 타이머다. 애니메이션을 따로 재생하면 프레임이
+	 * 튀거나 콘솔로 단계를 건너뛸 때 눈에 보이는 문과 탈 수 있는지가 어긋난다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Art")
+	TObjectPtr<UAnimSequenceBase> DoorOpenAnimation;
+
+	/** 문이 닫히는 애니메이션. 비워 두면 DoorOpenAnimation을 거꾸로 짚어 대신한다. */
+	UPROPERTY(EditAnywhere, Category = "Train|Art")
+	TObjectPtr<UAnimSequenceBase> DoorCloseAnimation;
+
+	/** 달리는 동안 반복 재생하는 바퀴 애니메이션. 비워 두면 바퀴는 멈춰 있다. */
+	UPROPERTY(EditAnywhere, Category = "Train|Art")
+	TObjectPtr<UAnimSequenceBase> WheelAnimation;
+
+	/**
+	 * 문 애니메이션의 길이로 DoorOpeningSeconds와 DoorCloseSeconds를 덮어쓴다(BeginPlay).
+	 *
+	 * 아트가 정한 속도 그대로 문이 움직이고, 탑승을 막는 시간도 그만큼 늘어난다. 끄면 위의 두
+	 * 시간에 맞춰 애니메이션을 늘이거나 줄인다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Art")
+	bool bMatchDoorTimingToAnimation = true;
+
+	/**
+	 * 바퀴 애니메이션을 PlayRate 1로 돌릴 때 열차가 초당 나아가야 할 거리(cm/s).
+	 *
+	 * 0이 아니면 달리는 동안 PlayRate를 지금 속도 / 이 값으로 맞춰 바퀴가 가감속을 따라간다.
+	 * 0이면 PlayRate에 손대지 않는다. AGridEscalator::AnimStepSpeedAtRate1과 같은 규약이다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Art", meta = (ClampMin = 0.0))
+	float WheelAnimSpeedAtRate1 = 0.0f;
+
 	// ---------------------------------------------------------------- 탑승 셀 자동 계산
 
 	/**
@@ -284,6 +339,15 @@ public:
 	 */
 	void GetApproachCells(TArray<FIntPoint>& OutCells) const;
 
+	/**
+	 * 정차역을 가리지 않고, 문마다 문 한가운데에 가장 가까운 문 앞 칸 하나씩.
+	 *
+	 * 플레이어가 열차를 누르면 폰은 먼저 여기로 가서 기다린다. 문 폭에 걸친 칸 가운데 가장자리에
+	 * 서 있으면 탈 때 문을 따라 옆으로 한참 걸어야 하므로, 문 한가운데와 거의 일직선인 칸에서
+	 * 기다리게 한다. 문 폭 안에 칸이 없는 문은 빠진다.
+	 */
+	void GetDoorFrontCells(TArray<FIntPoint>& OutCells) const;
+
 	/** 폰이 지금 이 열차에 탈 수 있으면 true. 아니면 이유를 알려준다. */
 	bool CanBoard(const AGridPawn* Pawn, FText* OutReason = nullptr) const;
 
@@ -298,6 +362,16 @@ public:
 	/** 문을 강제로 열거나 닫는다(콘솔 시험용). */
 	void ForceDoors(bool bOpen);
 
+	/**
+	 * 스켈레탈 메시의 문 본 위치로 문 중심을 구해 DoorOffsetsLocal과 비교해 로그로 찍는다.
+	 *
+	 * 아트 메시의 배치나 문 위치가 바뀌었을 때 탑승 셀이 여전히 문 앞인지 확인하는 용도다.
+	 * 본 이름에 Door가 들어간 것을 L/R, front/back을 뗀 이름으로 묶어 평균을 낸다. 본의
+	 * 피벗이 문짝 가운데가 아니면 값이 틀릴 수 있으니 참고로만 쓴다.
+	 */
+	UFUNCTION(CallInEditor, Category = "Train|Art", meta = (DisplayName = "Log Door Bone Offsets"))
+	void LogDoorBoneOffsets();
+
 	// ---------------------------------------------------------------- 생명주기
 
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -311,13 +385,14 @@ protected:
 	/**
 	 * 문이 열리는 동안 매 틱 불린다. Alpha는 0(닫힘)에서 1(완전히 열림)까지 간다.
 	 *
-	 * 지금은 아무것도 하지 않는다. 문 애니메이션이 준비되면 여기서 재생한다.
+	 * 기본 구현은 ArtMesh의 DoorOpenAnimation을 Alpha 위치로 짚는다. 스켈레탈 메시나
+	 * 애니메이션이 없으면 아무것도 하지 않는다.
 	 *
 	 * 승하차를 막는 것은 이 훅이 아니라 DoorsOpening 단계 자체다. 훅을 비워 두든 갈아 끼우든
 	 * 규칙이 흔들리지 않는다 -- CanBoard와 자동 하차는 단계만 본다.
 	 *
-	 * BlueprintNativeEvent다. 아트 메시를 가진 블루프린트가 이것을 구현해 자기 문짝을
-	 * 움직인다. 구현하지 않으면 비어 있는 네이티브 본체가 돈다.
+	 * BlueprintNativeEvent다. 블루프린트가 이 이벤트를 구현하면 **부모 호출을 넣어야** 기본
+	 * 구현(애니메이션 짚기)이 계속 돈다.
 	 */
 	UFUNCTION(BlueprintNativeEvent, Category = "Train")
 	void AnimateDoorsOpening(float Alpha);
@@ -326,7 +401,8 @@ protected:
 	/**
 	 * 문이 닫히는 동안 매 틱 불린다. Alpha는 0(열림)에서 1(완전히 닫힘)까지 간다.
 	 *
-	 * 열리는 쪽과 같은 규칙이다: 지금은 비어 있고, 승하차 차단은 단계가 맡는다.
+	 * 기본 구현은 DoorCloseAnimation을 짚고, 그것이 없으면 DoorOpenAnimation을 거꾸로 짚는다.
+	 * 열리는 쪽과 같은 규칙이다: 승하차 차단은 단계가 맡는다.
 	 */
 	UFUNCTION(BlueprintNativeEvent, Category = "Train")
 	void AnimateDoorsClosing(float Alpha);
@@ -374,6 +450,27 @@ private:
 	/** 구간 진행도 0~1에서의 속도 배율. 커브가 있으면 커브, 없으면 기본 가감속. */
 	float GetSpeedFactor(float Alpha) const;
 
+	/** 좌석이 차체 중심에서 진행축으로 벗어날 수 있는 최대 거리(cm). */
+	double GetSeatHalfExtent() const;
+
+	/** ArtMesh에 스켈레탈 메시가 지정돼 있어 애니메이션을 돌릴 수 있으면 true. */
+	bool HasArtMesh() const;
+
+	/** 문 애니메이션을 Alpha(0~1) 위치로 짚는다. bReverse면 끝에서부터 짚는다. */
+	void ScrubDoorAnimation(UAnimSequenceBase* Animation, float Alpha, bool bReverse);
+
+	/** 닫힘에 쓸 애니메이션. 닫힘이 없으면 열림을 돌려주고 bOutReverse를 켠다. */
+	UAnimSequenceBase* GetDoorClosingAnimation(bool& bOutReverse) const;
+
+	/** 애니메이션이 RateScale을 반영해 실제로 걸리는 시간(초). */
+	static float GetAnimationDuration(const UAnimSequenceBase* Animation);
+
+	/** 바퀴 애니메이션을 반복 재생한다. 달리기 시작할 때 부른다. */
+	void StartWheelAnimation();
+
+	/** 지금 속도에 맞춰 바퀴 애니메이션의 PlayRate를 맞춘다. */
+	void UpdateWheelPlayRate(double CurrentSpeed);
+
 	/** 블루프린트가 붙인 아트 메시의 빈 슬롯에 ArtFallbackMaterial을 씌운다. */
 	void ApplyArtFallbackMaterial();
 
@@ -415,6 +512,18 @@ private:
 	 * 두 번째 걸음은 폰이 셀 위에 다시 서기 전에는 시킬 수 없다.
 	 */
 	TWeakObjectPtr<AGridPawn> UnloadedPawn;
+
+	/** 방금 내린 폰이 그리드에 다시 선 뒤 걸어갈 셀. 없으면 (-1,-1). */
+	FIntPoint UnloadedGoalCell = FIntPoint(-1, -1);
+
+	/**
+	 * ArtMesh에 마지막으로 지정한 애니메이션.
+	 *
+	 * SetAnimation은 재생 위치를 0으로 되돌린다. 매 틱 부르면 문이 짚은 위치에서 매번 처음으로
+	 * 튀므로, 애니메이션이 바뀔 때만 부르기 위해 기억한다.
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimationAsset> CurrentArtAnimation;
 
 	/**
 	 * 지금 구간의 출발점과 도착점, 그리고 지금까지 온 거리.

@@ -101,6 +101,10 @@ C로 간다. `IsUsingArtVisual()`은 `VisualActorClass != nullptr || ArtMesh != 
 `AnimateDoorsOpening/Closing`을 `BlueprintNativeEvent`로 열어 BP가 `SM_Subway*Door_*`를 밀어
 연출한다. 승하차 차단은 단계(`ETrainPhase`)가 맡으므로 연출이 비어 있어도 규칙은 그대로다.
 
+> 2026-09-15: 메시 30개는 아트 스켈레탈 메시 하나(`ArtMesh`)로 바뀌었고, 문 연출은 C++ 기본 구현이
+> `Anim_Subway_DoorOpen/DoorClose`를 단계 진행도에 맞춰 짚는다. 좌석과 하차는 문 한가운데 기준이다.
+> `TrainArtDoors.md` 참고.
+
 전제 확인: 열차는 **X축으로 달리고 문은 +Y 면**이다(`RefreshVisual` 주석). Stage1 선로가 Y축이면
 정차 셀은 그대로 쓰되 `BodyLength/BodyWidth`를 바꿔 끼우고 문 면을 고르는 `DoorSide` 프로퍼티가
 필요하다(코드 변경 소). 0단계에서 `BP_RailTrack` 방향을 잰다.
@@ -398,7 +402,7 @@ CDO에는 월드도 루트 컴포넌트도 없다. 이번 작업 중에 실제�
 | `Puzzle/BP_Block_LBench` | `APuzzleBlock` | `SM_LBench_001`, 4x4, **빈 영역 (0,0) 3x3**, 높이 200 |
 | `Puzzle/BP_Block_VendingMachine` | `APuzzleBlock` | `SM_VendingMachine_Small`, 3x2, 높이 600 |
 | `Puzzle/BP_RotatingPillar_Station` | `APuzzleRotatingPillar` | `SM_Pillar_005`, **2x2**, 높이 800, 부착 면 북 |
-| `Vehicle/BP_Train_Subway` | `AGridTrain` | 메시 컴포넌트 30개, 프록시 숨김, 4525x600x727 |
+| `Vehicle/BP_Train_Subway` | `AGridTrain` | 메시 컴포넌트 30개, 프록시 숨김, 4525x600x727. **2026-09-15: 스태틱 30개를 스켈레탈 `ArtMesh`(`SM_Subway_001`)와 문·바퀴 애니메이션으로 교체**(`TrainArtDoors.md`) |
 
 L벤치의 빈 영역은 실측으로 정했다. 빈 레벨에 `SM_LBench_001`을 하나 놓고 50 cm 격자로
 트레이스한 결과, 4x4 중 **좌하단 3x3이 비어 있는 L자**였다. 그 덕분에 같은 자리에 있는 2x2

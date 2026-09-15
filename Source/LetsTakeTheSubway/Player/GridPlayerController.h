@@ -232,6 +232,15 @@ public:
 	 */
 	bool RequestElevatorBoarding(APuzzleElevatorBlock* Elevator);
 
+	/**
+	 * "저 열차를 타겠다"는 요청. 차체를 클릭하는 것과 같은 뜻이다.
+	 *
+	 * 클릭 경로와 콘솔 명령(ltts.TrainRide)이 이 하나를 공유한다. 엘리베이터와 같은 이유다.
+	 *
+	 * @return 폰이 문 앞으로 출발했거나 그 자리에서 기다리기 시작했으면 true.
+	 */
+	bool RequestTrainBoarding(AGridTrain* Train);
+
 	bool IsDraggingBlock() const { return DraggedBlock.IsValid(); }
 
 	bool IsDraggingLever() const { return DraggedLever.IsValid(); }

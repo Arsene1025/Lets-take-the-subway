@@ -589,18 +589,7 @@ void AGridPlayerController::OnPressed()
 
 	if (Pick.Kind == FCursorPick::EKind::Vehicle)
 	{
-		AGridTrain* Train = Pick.Vehicle.Get();
-		if (!Train)
-		{
-			return;
-		}
-
-		// 정차역을 가리지 않고 문 앞 셀을 모은다. 클릭한 순간 열차가 터널 한가운데 있을 수도
-		// 있으므로, 폰은 "지금 서 있는 역"이 아니라 승강장 전체에서 가장 가까운 문으로 간다.
-		TArray<FIntPoint> DoorCells;
-		Train->GetApproachCells(DoorCells);
-
-		BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, DoorCells);
+		RequestTrainBoarding(Pick.Vehicle.Get());
 		return;
 	}
 
@@ -696,6 +685,36 @@ void AGridPlayerController::MovePawnToCell(const FIntPoint& Cell)
 }
 
 // ---------------------------------------------------------------------------- 예약 탑승
+
+bool AGridPlayerController::RequestTrainBoarding(AGridTrain* Train)
+{
+	if (!Train)
+	{
+		return false;
+	}
+
+	// 정차역을 가리지 않고 문 앞 셀을 모은다. 클릭한 순간 열차가 터널 한가운데 있을 수도
+	// 있으므로, 폰은 "지금 서 있는 역"이 아니라 승강장 전체에서 가장 가까운 문으로 간다.
+	//
+	// 먼저 문 한가운데와 일직선에 가까운 칸으로 보낸다. 거기서 기다리면 탈 때 옆걸음이 거의
+	// 없다. 그런 칸에 갈 길이 없을 때만(누가 서 있거나 막힘) 문 앞 칸 아무 데로나 간다.
+	TArray<FIntPoint> FrontCells;
+	Train->GetDoorFrontCells(FrontCells);
+
+	AGridActor* Grid = GetGrid();
+	AGridPawn* GridPawn = GetGridPawn();
+	FIntPoint Reachable;
+	if (!FrontCells.IsEmpty() && Grid && GridPawn
+		&& Grid->FindNearestReachableCell(GridPawn->GetCurrentCell(), FrontCells, GridPawn, Reachable))
+	{
+		return BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, FrontCells);
+	}
+
+	TArray<FIntPoint> DoorCells;
+	Train->GetApproachCells(DoorCells);
+
+	return BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, DoorCells);
+}
 
 bool AGridPlayerController::RequestElevatorBoarding(APuzzleElevatorBlock* Elevator)
 {

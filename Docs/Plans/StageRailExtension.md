@@ -132,6 +132,10 @@
 
 `BoardingCells`는 네 역 모두 비워 둔 채 자동 계산에 맡긴다(2.5 보완 전제). `DisembarkCount` 3 유지. 두 열차 모두 Z 8988.15 유지.
 
+> 2026-09-15: 위 `ExitCell`은 승강장 가운데(열차 중앙) 셀이라 폰이 차체 벽을 비스듬히 뚫고 나왔다. 이제 폰은 문 한가운데에서
+> 문 앞 칸으로 수직으로 나오고, `ExitCell`이 문 앞 칸이 아니면 내린 뒤 걸어갈 목표로 쓴다(값은 그대로). 같은 날
+> `BP_Train_Subway_S2`의 `BodyLength`를 2120 → 4223(두 량 전체)으로 고쳤다. `TrainArtDoors.md` 참고.
+
 ### 2.4 Stage2 블록·마커·시작점 정리
 
 1. 삭제된 `Vending_SM_L2_VendingMachine3` 복구: `BP_Block_VendingMachine_Small`을 **(−617, 951, 9120) yaw 90**(입구 역 델타 적용값)에 배치 — 아트가 의도적으로 뺀 것인지 먼저 확인(3절 Q3).

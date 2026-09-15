@@ -415,7 +415,8 @@ bool AGridPawn::PlanPath(FIntPoint Goal)
 
 // ---------------------------------------------------------------------------- 탑승과 하차
 
-void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent)
+void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent,
+	const TOptional<FVector>& ApproachWorld)
 {
 	if (!InVehicle)
 	{
@@ -432,7 +433,15 @@ void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, UScene
 	Vehicle = InVehicle;
 	RideAnchor = FollowComponent;
 	WalkTarget = SeatWorld;
+	PendingSeat.Reset();
 	RideState = ERideState::Entering;
+
+	// 경유점이 있으면 거기부터 간다. 이미 그 자리에 있으면(1 cm 안) 곧장 좌석으로 간다.
+	if (ApproachWorld.IsSet() && !ApproachWorld.GetValue().Equals(GetActorLocation(), 1.0))
+	{
+		WalkTarget = ApproachWorld.GetValue();
+		PendingSeat = SeatWorld;
+	}
 
 	UE_LOG(LogLTTSGrid, Display,
 		TEXT("%s: boarding %s from cell (%d,%d)."),
@@ -510,9 +519,19 @@ void AGridPawn::TickStraightWalk(float DeltaSeconds)
 	if (RideState == ERideState::Entering)
 	{
 		AActor* Ride = Vehicle.Get();
+
+		// 좌석 앞 경유점에 닿았다. 이제 좌석으로 똑바로 들어간다.
+		if (PendingSeat.IsSet() && Ride)
+		{
+			WalkTarget = PendingSeat.GetValue();
+			PendingSeat.Reset();
+			return;
+		}
+
 		if (!Ride)
 		{
 			// 걸어 들어가는 사이에 탈것이 사라졌다. 발밑에서 다시 그리드를 찾는다.
+			PendingSeat.Reset();
 			RideState = ERideState::OnGrid;
 			RideAnchor.Reset();
 			WalkOntoGrid(GetActorLocation());
