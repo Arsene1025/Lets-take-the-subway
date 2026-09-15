@@ -592,3 +592,60 @@ different level."로 거부된다. `Place_*`·`EndingPoint*`·`AC_*` 표식 액�
 - [ ] 문이 열린 동안 아트 문 앞(셀 X 106, Y 44~48/53~57/67~71/76~80)에서 클릭하면 탄다.
 - [ ] 문이 닫혔을 때 열차를 클릭하면 "The doors are closed."가 뜨고 폰은 뒤쪽 바닥으로 걷는다.
 - [ ] 열차가 부드럽게 출발했다가 도착 직전 급히 선다(9.11).
+
+## 10. 에스컬레이터 교체 — ART_2 `f44759d` 병합 (2026-09-15)
+
+아트가 옛 에스컬레이터(`BP_escalator_*_s`)를 새 에스컬레이터로 바꿨다. 아트 브랜치가 노선 연장
+작업(`47266c6`) 이전에서 갈라져 `Subway_Stage1.umap`·`BP_ESCALATOR_DOWN/UP`이 충돌했으므로, 세
+파일은 PROG_1 쪽을 두고 아트 변경을 에디터에서 다시 적용했다. 아트의 `BP_ESCALATOR_DOWN/UP` 변경은
+속성 차이가 없어(에디터 메타데이터뿐) 그대로 버렸다.
+
+### 10.1 맵 변경
+
+| 구분 | 내용 |
+|---|---|
+| 삭제 | `BP_escalator_down_s`, `BP_escalator_down_s2`, `BP_escalator_up_s`, 표식 `Place_Escalator001_B1`, `Player`(스태틱 메시), `EndingPoint01` |
+| 추가 | `BP_ESCALATOR_DOWN_ST1` (−4920, 16130, −25) yaw −90 · `BP_ESCALATOR_DOWN_ST2`(클래스 `_ST1`) (1712, 2836, −29) · `BP_ESCALATOR_UP_ST1` (1327, 2837, −29) · `BP_ESCALATOR_DOWN3`(클래스 `BP_ESCALATOR_DOWN`) (1710, −1323, 770) |
+| 이동 | `SM_Abstract`·`SM_Abstract1~15` 중 15개, `SM_Clock2~4` — 15~60 cm |
+| 회전 | `BP_Block_VendingMachine`·`BP_Block_VendingMachine2` yaw 180 → 0 |
+| 프로그래머 수정 | 동쪽 마커 `GridBoxMarker25~27` Y 3150 → **2850**. 옛 에스컬레이터 아래 승강판 자리를 막던 마커인데, 새 메시가 3칸 짧아 탑승 칸(행 55)을 막고 있었다. 이제 새 승강판(행 52~54)을 막는다 |
+
+그리드는 `Generate Grid`로 다시 구웠다: walkable 4129 · blocked 11847 · noFloor 14124 · override 447 ·
+stepBreaks 153 (이전 4127 / 11849 / 14124 / 447 / 155).
+
+### 10.2 새 BP를 탈것으로 만들기
+
+`BP_ESCALATOR_DOWN_ST1`·`BP_ESCALATOR_UP_ST1`은 아트가 부모 `Actor` 상태의 `BP_ESCALATOR_DOWN/UP`을
+복제한 것이라 탈 수 없었다. 부모를 `AGridEscalator`로 바꿨다(컴포넌트 5개 유지 확인).
+
+인스턴스 값(4대 공통, 메시가 같다). 새 메시는 로컬 **−Y가 윗끝**이고 상승 799 cm, 길이 1254 cm다.
+
+| 항목 | 값 |
+|---|---|
+| `RidePathLocal` (DOWN) | (0, −1000, 807) → (0, −702, 820) → (0, −225, 20) → (0, 100, 40) |
+| `RidePathLocal` (UP) | 위의 역순 |
+| `ClickBoxCentreLocal` / `ClickBoxExtent` | (0, −445, 420) / (200, 630, 440) — 기본값은 X축 방향이라 Y로 긴 새 메시를 덮지 못한다 |
+
+경로는 중앙선 수직 트레이스 실측이다: 아래 승강판 로컬 Y 100~−200(Z 16~40), 경사 −250~−650,
+위 승강판 −750~−1050(Z 820~802), B1 바닥 799, B2 바닥 0. 트레이스 경사는 약 59°인데 측면 패널은 약
+51°로 보여, 경사 중간에서 공이 발판과 어긋나 보일 수 있다(10.4).
+
+### 10.3 확인 결과 (PIE, 셀 데이터)
+
+| 에스컬레이터 | 탑승 셀 (층) | 내리는 셀 (층) |
+|---|---|---|
+| 서쪽 `DOWN_ST1` | (54,186)·(54,187) Walkable Z 771, (54,185)는 Blocked | (67,186) Walkable Z −26 |
+| 동쪽 `DOWN_ST2` | (131~133, 42) Walkable Z 770 | 행 55 Walkable Z −29 |
+| 동쪽 `UP_ST1` | (127~129, 55) Walkable Z −29 | 행 42 Walkable Z 770 |
+| B1 `DOWN3` | (132,0)·(133,0) Clearance Blocked, (134,0) NoFloor — 윗끝이 지상(Z≈1548)이라 그리드 밖 | — |
+
+- 4대 모두 `ride is 1555 cm long, boarding from 3 cell(s)`. 새 경고 없음(남은 경고는 StageRailExtension.md 5.4와 같다).
+- 9.6-3(동쪽 두 대 윗끝이 허공)은 새 배치에서 해소됐다. 윗끝 행 42가 B1 바닥(Z 770)이다.
+- `DOWN3`는 지상 입구용이라 지금은 탈 수 없다. 누르면 "Stand at the near end to ride."가 뜬다. 지상층을 그리드에 넣으면 경로는 이미 맞춰져 있다.
+
+### 10.4 손으로 확인해야 할 것
+
+- [ ] 동쪽 B1 (132,42)에서 `DOWN_ST2`를 누르면 타고 내려가 B2 행 55 부근에 선다. `UP_ST1`은 반대로.
+- [ ] 서쪽 B1 (54,186)에서 `DOWN_ST1`을 타고 B2 (67,186) 부근에 선다.
+- [ ] 경사 중간에서 공이 발판에 묻히거나 뜨지 않는지. 어긋나면 `RidePathLocal` [1]·[2]의 Y를 조정한다.
+- [ ] 자판기 2대(`BP_Block_VendingMachine`, `…2`)가 yaw 0에서 벽·기둥과 겹쳐 보이지 않는지.
