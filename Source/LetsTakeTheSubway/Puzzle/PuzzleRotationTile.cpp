@@ -8,6 +8,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -262,6 +263,11 @@ bool APuzzleRotationTile::TryRotate(FText* OutReason)
 
 	bRotating = true;
 	RotationElapsed = 0.0f;
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAtLocation(RotateSoundKey, PivotWorld);
+	}
 
 	// 거부된 회전은 순서를 소모하지 않는다: 검사 패스가 돌려보낸 뒤에는 여기까지 오지 못한다.
 	// 그래야 바닥이 모자라 한 번 막혔다고 해서 다음 방향이 뒤집히지 않는다.

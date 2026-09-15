@@ -9,6 +9,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -189,7 +190,18 @@ bool APuzzleLever::TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReas
 		return false;
 	}
 
-	return Target->TryRotate(TurnSign, OutReason);
+	if (Target->TryRotate(TurnSign, OutReason))
+	{
+		return true;
+	}
+
+	// 여기까지 왔으면 휠은 돌았는데 장애물이 걸린 것이다. 위의 레버 자체 거부(손이 안 닿음, 한쪽만 도는
+	// 휠)에는 소리를 내지 않는다 -- 걸린 것은 장애물이다.
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(Target->RotateJamSoundKey, Target->GetRootComponent());
+	}
+	return false;
 }
 
 // ---------------------------------------------------------------------------- 생명주기

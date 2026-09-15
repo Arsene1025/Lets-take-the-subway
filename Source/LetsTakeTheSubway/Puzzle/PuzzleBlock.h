@@ -7,6 +7,7 @@
 #include "Grid/GridFootprint.h"
 #include "Grid/GridTypes.h"
 #include "Puzzle/PuzzleTypes.h"
+#include "Sound/SoundKeys.h"
 #include "PuzzleBlock.generated.h"
 
 class AGridActor;
@@ -133,6 +134,14 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
 	bool bOneStepPerDrag = false;
+
+	/** 한 칸 밀릴 때마다 내는 소리(DA_SoundLibrary 키). None이면 소리 없음. */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Sound")
+	FName SlideSoundKey = LTTSSoundKeys::PuzzleSlide;
+
+	/** 막힌 쪽으로 끌었을 때 내는 소리. 거부 한 방향당 한 번(AGridPlayerController::UpdateDrag). */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Sound")
+	FName JamSoundKey = LTTSSoundKeys::PuzzleJam;
 
 	/**
 	 * 그레이박스 큐브 대신 보여 줄 아트 액터. 비워 두면 지금까지처럼 큐브를 그린다.

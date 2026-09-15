@@ -13,6 +13,7 @@
 #include "Puzzle/PuzzleLever.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 #include "Stage/StageInfo.h"
 #include "Stage/StageSubsystem.h"
 #include "Vehicle/GridTrain.h"
@@ -520,6 +521,11 @@ bool AGridPlayerController::TraceFloorIgnoringBlocks(
 
 void AGridPlayerController::OnPressed()
 {
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySound2D(ClickSoundKey);
+	}
+
 	AGridActor* Grid = GetGrid();
 	AGridPawn* GridPawn = GetGridPawn();
 
@@ -1380,6 +1386,11 @@ void AGridPlayerController::UpdateDrag()
 		LastRefusedDir = Refused;
 		bHasRefusedDir = true;
 		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+
+		if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+		{
+			Sound->PlaySoundAttached(Block->JamSoundKey, Block->GetRootComponent());
+		}
 	}
 }
 

@@ -7,6 +7,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleElevatorBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -601,8 +602,8 @@ bool APuzzleElevatorDock::TryLaunch(AGridPawn* Pawn, FText* OutReason)
 
 void APuzzleElevatorDock::HandleStageClear(APawn* Pawn, FIntPoint Cell)
 {
-	// 행인은 StageClear 셀을 밟아도 아무 일이 없어야 한다. 지금은 행인이 그 사건을 내지
-	// 않지만, 스테이지 클리어는 플레이어의 사건이라는 사실을 여기에도 적어 둔다.
+	// 행인은 StageClear 셀을 밟아도 아무 일이 없어야 한다. 행인도 셀 진입을 알리므로(2026-09-15,
+	// 개찰구 소리) 이 검사가 실제로 행인을 거른다.
 	if (!Cast<AGridPawn>(Pawn) || bIsClear)
 	{
 		return;
@@ -630,6 +631,11 @@ void APuzzleElevatorDock::HandleHoldReached(APuzzleElevatorBlock* Elevator, APaw
 
 	// 블루프린트가 파생 클래스로 구현했다면 그쪽이, 레벨 블루프린트가 매달았다면 이쪽이
 	// 받는다. 둘 다 두어야 구조물을 블루프린트로 바꾸지 않고도 연출을 붙일 수 있다.
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySound2D(ClearSoundKey);
+	}
+
 	OnStageClearCutscene(Elevator, Pawn);
 	OnClearCutscene.Broadcast(this, Elevator, Pawn);
 }

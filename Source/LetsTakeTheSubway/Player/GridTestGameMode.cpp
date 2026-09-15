@@ -7,6 +7,10 @@
 #include "Player/GridHUD.h"
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
+#include "Puzzle/PuzzleElevatorDock.h"
+#include "Sound/GameSoundSubsystem.h"
+
+#include "EngineUtils.h"
 
 AGridTestGameMode::AGridTestGameMode()
 {
@@ -33,15 +37,32 @@ void AGridTestGameMode::BeginPlay()
 
 void AGridTestGameMode::HandleStageClear(APawn* Pawn, FIntPoint Cell)
 {
-	// 행인은 StageClear 셀을 밟아도 아무 일이 없어야 한다. 지금은 행인이
-	// NotifyPawnEnteredCell을 부르지 않지만, 스테이지 클리어는 플레이어의 사건이라는
-	// 사실을 여기에도 적어 둔다.
+	// 행인은 StageClear 셀을 밟아도 아무 일이 없어야 한다. 행인도 NotifyPawnEnteredCell을 부르므로
+	// (2026-09-15, 개찰구 소리) 이 검사가 실제로 행인을 거른다.
 	if (!Cast<AGridPawn>(Pawn))
 	{
 		return;
 	}
 
 	UE_LOG(LogLTTSGrid, Display, TEXT("STAGE CLEAR at cell (%d,%d)."), Cell.X, Cell.Y);
+
+	bool bDockOwnsClear = false;
+	for (TActorIterator<APuzzleElevatorDock> It(GetWorld()); It; ++It)
+	{
+		if (It->bClearOnStageClear)
+		{
+			bDockOwnsClear = true;
+			break;
+		}
+	}
+
+	if (!bDockOwnsClear)
+	{
+		if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+		{
+			Sound->PlaySound2D(ClearSoundKey);
+		}
+	}
 
 	if (AGridPlayerController* GridController = Cast<AGridPlayerController>(GetWorld()->GetFirstPlayerController()))
 	{

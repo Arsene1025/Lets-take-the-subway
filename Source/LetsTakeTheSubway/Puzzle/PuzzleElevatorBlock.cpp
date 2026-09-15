@@ -6,11 +6,13 @@
 #include "Grid/GridActor.h"
 #include "Puzzle/PuzzleElevatorDock.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 #include "Player/GridPawn.h"
 #include "Player/GridPlayerController.h"
 // 지금은 쓰지 않는다. GetSeatWorldFor의 ELEVATOR SEAT FACING RIDER 블록을 되살릴 때 필요하다.
 #include "Vehicle/VehicleSeat.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -373,6 +375,10 @@ void APuzzleElevatorBlock::FinishTravel()
 	TravelPhase = ETravelPhase::None;
 	bHoldAtTarget = false;
 	Rider.Reset();
+
+	// 보통은 도착할 때 이미 멈췄다. 승객이 사라지는 등 중간에 끝날 때를 위해 한 번 더.
+	UGameSoundSubsystem::StopSound(MovingAudio.Get(), 0.2f);
+	MovingAudio.Reset();
 	SetAnimState(EAnimState::Idle);
 
 	OnArrived.Broadcast(this, Pawn);
@@ -405,6 +411,11 @@ void APuzzleElevatorBlock::Tick(float DeltaSeconds)
 		if (Pawn->IsRiding())
 		{
 			TravelPhase = ETravelPhase::Moving;
+
+			if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+			{
+				MovingAudio = Sound->PlaySoundAttached(MovingSoundKey, GetRootComponent());
+			}
 		}
 		break;
 
@@ -418,6 +429,14 @@ void APuzzleElevatorBlock::Tick(float DeltaSeconds)
 		if (NewLocation.Equals(Target, 0.5))
 		{
 			SetActorLocation(Target);
+
+			UGameSoundSubsystem::StopSound(MovingAudio.Get(), 0.2f);
+			MovingAudio.Reset();
+
+			if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+			{
+				Sound->PlaySoundAttached(ArrivedSoundKey, GetRootComponent());
+			}
 
 			if (bHoldAtTarget)
 			{

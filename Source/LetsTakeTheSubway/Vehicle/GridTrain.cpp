@@ -12,8 +12,10 @@
 #include "Player/GridPlayerController.h"
 #include "Vehicle/VehicleSeat.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Animation/AnimSequenceBase.h"
+#include "Components/AudioComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -745,8 +747,57 @@ void AGridTrain::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Subsystem->UnregisterVehicle(this);
 	}
 
+	// 안 소리는 위치 없이 월드에 떠 있어 열차와 함께 사라지지 않는다.
+	StopInsideSound(0.0f);
+
 	Rider.Reset();
 	Super::EndPlay(EndPlayReason);
+}
+
+// ---------------------------------------------------------------------------- 사운드
+
+void AGridTrain::UpdateArrivalSounds()
+{
+	if (!Stops.IsValidIndex(CurrentStop) || !Stops[CurrentStop].bArrivalSounds)
+	{
+		return;
+	}
+
+	UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this);
+	if (!Sound)
+	{
+		return;
+	}
+
+	const double Remaining = FMath::Max(MoveLength - MoveDistance, 0.0);
+	const auto Reached = [Remaining](float Distance)
+	{
+		return Distance <= 0.0f || Remaining <= Distance;
+	};
+
+	if (!bNotificationPlayed && Reached(NotificationDistance))
+	{
+		bNotificationPlayed = true;
+		Sound->PlaySound2D(SoundKeys.Notification);
+	}
+
+	if (!bApproachPlayed && Reached(ApproachSoundDistance))
+	{
+		bApproachPlayed = true;
+		ApproachAudio = Sound->PlaySoundAttached(SoundKeys.Approach, GetRootComponent());
+	}
+
+	if (!bStopSoundPlayed && Reached(StopSoundDistance))
+	{
+		bStopSoundPlayed = true;
+		Sound->PlaySoundAttached(SoundKeys.Stop, GetRootComponent());
+	}
+}
+
+void AGridTrain::StopInsideSound(float FadeOutSeconds)
+{
+	UGameSoundSubsystem::StopSound(InsideAudio.Get(), FadeOutSeconds);
+	InsideAudio.Reset();
 }
 
 // ---------------------------------------------------------------------------- 정차역
@@ -801,6 +852,20 @@ void AGridTrain::EnterMoving()
 	Phase = ETrainPhase::Moving;
 	StartWheelAnimation();
 
+	// 새 구간의 도착 소리를 다시 준비한다. 실제로 내는 것은 Tick의 남은 거리 판정이다.
+	bNotificationPlayed = false;
+	bApproachPlayed = false;
+	bStopSoundPlayed = false;
+
+	// 플레이어를 태우고 떠난다. 카메라가 열차 안을 보지 않으므로 위치 없이 깐다.
+	if (Rider.IsValid() && !InsideAudio.IsValid())
+	{
+		if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+		{
+			InsideAudio = Sound->PlaySound2D(SoundKeys.Inside);
+		}
+	}
+
 	// 구간을 통째로 기억한다. 가감속은 "지금 몇 퍼센트를 왔는가"를 알아야 하는데,
 	// 매 프레임 현재 위치에서 목표까지의 남은 거리만 보면 그 답이 나오지 않는다.
 	MoveFrom = GetActorLocation();
@@ -830,6 +895,21 @@ void AGridTrain::EnterDoorsOpening()
 	Phase = ETrainPhase::DoorsOpening;
 	PhaseTimer = DoorOpeningSeconds;
 	RefreshDoorLook();
+
+	// 진입음이 남아 있으면 문 소리에 자리를 내준다. 안 소리는 내리기 시작하므로 끝낸다.
+	UGameSoundSubsystem::StopSound(ApproachAudio.Get(), 0.3f);
+	ApproachAudio.Reset();
+	StopInsideSound(0.5f);
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(SoundKeys.DoorOpen, GetRootComponent());
+
+		if (Rider.IsValid())
+		{
+			Sound->PlaySound2D(SoundKeys.ArrivalAnnouncement);
+		}
+	}
 
 	UE_LOG(LogLTTSGrid, Verbose,
 		TEXT("%s: doors opening at stop %d '%s'."),
@@ -980,6 +1060,11 @@ void AGridTrain::EnterDoorsClosing()
 	PhaseTimer = DoorCloseSeconds;
 	RefreshDoorLook();
 
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(SoundKeys.DoorClose, GetRootComponent());
+	}
+
 	UE_LOG(LogLTTSGrid, Verbose, TEXT("%s: doors closing."), *GetName());
 
 	AnimateDoorsClosing(0.0f);
@@ -1034,6 +1119,8 @@ void AGridTrain::Tick(float DeltaSeconds)
 		const float Alpha = static_cast<float>(FMath::Clamp(MoveDistance / MoveLength, 0.0, 1.0));
 		const double CurrentSpeed = Speed * GetSpeedFactor(Alpha);
 		MoveDistance += CurrentSpeed * DeltaSeconds;
+
+		UpdateArrivalSounds();
 
 		// 바퀴가 가감속을 따라 빨라지고 느려진다.
 		UpdateWheelPlayRate(CurrentSpeed);

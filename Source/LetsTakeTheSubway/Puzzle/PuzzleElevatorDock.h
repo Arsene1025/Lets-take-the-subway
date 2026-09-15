@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Grid/GridTypes.h"
 #include "Puzzle/PuzzleFloorTile.h"
+#include "Sound/SoundKeys.h"
 #include "PuzzleElevatorDock.generated.h"
 
 class AGridPawn;
@@ -122,6 +123,10 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Elevator Dock|Stage Clear", meta = (ClampMin = 0.0))
 	float ClearTravelSpeed = 0.0f;
+
+	/** 엔딩 승강기가 멈춰 서서 연출이 시작될 때 내는 소리(DA_SoundLibrary 키). */
+	UPROPERTY(EditAnywhere, Category = "Elevator Dock|Stage Clear")
+	FName ClearSoundKey = LTTSSoundKeys::StageClear;
 
 	/**
 	 * 엔딩 승강기가 멈춰 섰다. 페이드·시퀀스·씬 전환을 여기에 구현한다.

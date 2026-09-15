@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Puzzle/PuzzleTypes.h"
 #include "Stage/StageTypes.h"
+#include "Sound/SoundKeys.h"
 #include "GridPlayerController.generated.h"
 
 class AGridActor;
@@ -266,6 +267,15 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Input")
 	float KeyboardYawOffset = -45.0f;
+
+	/**
+	 * 월드를 클릭(마우스 왼쪽 누름)할 때 내는 소리(DA_SoundLibrary 키). None이면 소리 없음.
+	 *
+	 * UMG 버튼 클릭 소리는 여기가 아니라 버튼 스타일의 Pressed Sound에 넣는다. UI 위의 클릭은 이 컨트롤러의
+	 * 입력으로 오지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Input|Sound")
+	FName ClickSoundKey = LTTSSoundKeys::UIClick;
 
 private:
 	/** 구역이 바뀌었으면 그 구역 카메라로 옮긴다. 레벨 시작 판정 때는 보간 없이 곧바로 붙인다. */

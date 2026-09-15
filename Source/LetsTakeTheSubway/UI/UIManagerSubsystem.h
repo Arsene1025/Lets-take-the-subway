@@ -81,6 +81,32 @@ public:
 #pragma endregion
 
 
+#pragma region Settings
+public:
+    /**
+     * 설정 패널 슬라이더에 넣을 현재 마스터 볼륨(0~1). OpenSettingPanel에서 슬라이더 값을 맞출 때 쓴다.
+     *
+     * 실제 음향은 UGameSoundSubsystem이 맡고, 이 매니저는 위젯이 오디오 API를 직접 만지지 않도록 값을
+     * 넘겨 주는 창구다.
+     */
+    UFUNCTION(BlueprintPure, Category = "UI|Settings")
+    float GetMasterVolume() const;
+
+    /**
+     * 슬라이더 값을 곧바로 음향에 적용한다. 슬라이더 OnValueChanged에 연결한다.
+     *
+     * 드래그하는 동안 매 프레임 불려도 된다. 디스크에는 쓰지 않는다(CommitSettings).
+     */
+    UFUNCTION(BlueprintCallable, Category = "UI|Settings")
+    void ApplyMasterVolume(float Volume01);
+
+    /** 지금 설정값을 저장한다. 설정 패널을 닫거나 적용할 때(CloseSettingPanel / ApplySettings) 부른다. */
+    UFUNCTION(BlueprintCallable, Category = "UI|Settings")
+    void CommitSettings();
+
+#pragma endregion
+
+
 #pragma region Helper
 private:
     UUserWidget* GetOrCreateWidget(TObjectPtr<UUserWidget>& Cached, const TSoftClassPtr<UUserWidget>& ClassPtr);

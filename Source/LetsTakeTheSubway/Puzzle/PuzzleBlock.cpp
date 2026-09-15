@@ -8,6 +8,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleRegion.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/ChildActorComponent.h"
 #include "Components/SceneComponent.h"
@@ -525,6 +526,12 @@ bool APuzzleBlock::StartSlide(EGridDirection Dir)
 	SlideTarget = GridFootprint::CentreFromMinCell(*Grid, MinCell, GetWorldFootprint(), FloorZ);
 	AnimState = EAnimState::Sliding;
 	++StepsWhileHeld;
+
+	// 이어 밀기는 Tick이 칸마다 여기를 다시 부르므로 소리도 칸마다 난다(드르륵).
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(SlideSoundKey, GetRootComponent());
+	}
 
 	return true;
 }

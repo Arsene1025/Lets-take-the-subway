@@ -400,6 +400,8 @@ bool AGridActor::FindNearestReachableCell(FIntPoint From, const TArray<FIntPoint
 
 void AGridActor::NotifyPawnEnteredCell(APawn* Pawn, FIntPoint Cell)
 {
+	OnPawnEnteredCell.Broadcast(Pawn, Cell);
+
 	const FGridCellData* Data = GetCell(Cell);
 	if (Data && Data->Type == EGridCellType::StageClear)
 	{

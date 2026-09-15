@@ -5,6 +5,8 @@
 #include "UISettings.h"
 #include "UIInitializable.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/GameInstance.h"
+#include "Sound/GameSoundSubsystem.h"
 #include "GameFramework/PlayerController.h"
 
 
@@ -170,6 +172,45 @@ void UUIManagerSubsystem::CallUIOpened()
 void UUIManagerSubsystem::CallUIClosed()
 {
     OnUIClosed.Broadcast();
+}
+
+#pragma endregion
+
+
+
+#pragma region Settings
+
+namespace
+{
+    UGameSoundSubsystem* GetSoundSubsystem(const ULocalPlayer* LP)
+    {
+        const UGameInstance* GI = LP ? LP->GetGameInstance() : nullptr;
+        return GI ? GI->GetSubsystem<UGameSoundSubsystem>() : nullptr;
+    }
+}
+
+float UUIManagerSubsystem::GetMasterVolume() const
+{
+    const UGameSoundSubsystem* Sound = GetSoundSubsystem(GetLocalPlayer());
+    return Sound ? Sound->GetMasterVolume() : 1.0f;
+}
+
+void UUIManagerSubsystem::ApplyMasterVolume(float Volume01)
+{
+    // 슬라이더 값 그대로 선형 볼륨으로 쓴다. 낮은 구간이 너무 급하게 들리면 여기서만
+    // Volume01 * Volume01로 바꾸면 되고, 저장값과 슬라이더 위치는 흔들리지 않는다.
+    if (UGameSoundSubsystem* Sound = GetSoundSubsystem(GetLocalPlayer()))
+    {
+        Sound->SetMasterVolume(Volume01);
+    }
+}
+
+void UUIManagerSubsystem::CommitSettings()
+{
+    if (UGameSoundSubsystem* Sound = GetSoundSubsystem(GetLocalPlayer()))
+    {
+        Sound->SaveSettings();
+    }
 }
 
 #pragma endregion
