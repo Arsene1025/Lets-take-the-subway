@@ -206,6 +206,7 @@
 
 - `AGridTrain` — `BoardingSearchCells`(기본 6), `BoardingFloorTolerance`(기본 150 cm) 추가. `ComputeBoardingCells`가 선로 높이 ±허용치 밖의 걸을 수 있는 셀(턱)을 건너뛰고 더 바깥을 본다.
 - `AGridActor`·`AGridTrain`·`AStageZoneVolume`·`AStageInfo` — 생성자에서 `bLockLocation = true`(에디터 전용). 기존 배치 인스턴스에도 적용됨을 에디터 메뉴(Actor > Transform > Lock Item Movement)로 확인했다. `PlayerStart`는 엔진 클래스라 인스턴스마다 수동으로 켰다.
+  - 2026-09-15: 구역 조정 단계라 `AStageZoneVolume`의 잠금은 주석 처리했다. 구역 배치가 확정되면 다시 켠다.
 
 ### 5.3 검증 (PIE, `LogLTTSGrid`)
 
