@@ -64,6 +64,11 @@ void ABusStopCutsceneDirector::BeginPlay()
 
 	Phase = EPhase::WaitingForPlayer;
 
+	if (bDisableShadowCacheWhileHere)
+	{
+		DisableShadowCache();
+	}
+
 	// 첫 프레임부터 검게 가린다. 컨트롤러가 아직 없으면 Tick에서 다시 한다.
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
@@ -99,7 +104,47 @@ void ABusStopCutsceneDirector::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Player->OnFinished.RemoveDynamic(this, &ABusStopCutsceneDirector::HandleSequenceFinished);
 	}
 
+	RestoreShadowCache();
+
 	Super::EndPlay(EndPlayReason);
+}
+
+void ABusStopCutsceneDirector::DisableShadowCache()
+{
+	IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.Cache"));
+	if (!CVar)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: r.Shadow.Virtual.Cache not found; shadow ghosting fix skipped."), *GetName());
+		return;
+	}
+
+	SavedShadowCacheValue = CVar->GetInt();
+	if (SavedShadowCacheValue == 0)
+	{
+		// 이미 꺼져 있으면 건드리지 않는다(되돌릴 것도 없다).
+		SavedShadowCacheValue = -1;
+		return;
+	}
+
+	// 콘솔에서 손으로 바꾼 값보다 우선순위가 낮으면 무시되므로 콘솔과 같은 우선순위로 쓴다.
+	CVar->Set(0, ECVF_SetByConsole);
+	UE_LOG(LogLTTSGrid, Log, TEXT("%s: r.Shadow.Virtual.Cache %d -> 0 while this cutscene map is loaded."),
+		*GetName(), SavedShadowCacheValue);
+}
+
+void ABusStopCutsceneDirector::RestoreShadowCache()
+{
+	if (SavedShadowCacheValue < 0)
+	{
+		return;
+	}
+
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.Cache")))
+	{
+		CVar->Set(SavedShadowCacheValue, ECVF_SetByConsole);
+		UE_LOG(LogLTTSGrid, Log, TEXT("%s: r.Shadow.Virtual.Cache restored to %d."), *GetName(), SavedShadowCacheValue);
+	}
+	SavedShadowCacheValue = -1;
 }
 
 void ABusStopCutsceneDirector::Tick(float DeltaSeconds)
