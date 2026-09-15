@@ -119,7 +119,8 @@ void AGridPawn::BeginPlay()
 
 	if (!EnsureGrid())
 	{
-		UE_LOG(LogLTTSGrid, Error, TEXT("%s: no AGridActor in the level; movement is disabled."), *GetName());
+		// 컷씬 맵(버스 정류장)은 일부러 그리드가 없다. 거기서도 매번 Error가 뜨면 진짜 오류가 묻히므로 Warning으로 둔다.
+		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: no AGridActor in the level; grid movement is disabled."), *GetName());
 		return;
 	}
 
@@ -433,14 +434,15 @@ void AGridPawn::BoardVehicle(AActor* InVehicle, const FVector& SeatWorld, UScene
 	Vehicle = InVehicle;
 	RideAnchor = FollowComponent;
 	WalkTarget = SeatWorld;
-	PendingSeat.Reset();
+	PendingWalkTarget.Reset();
+	bLeavingToPoint = false;
 	RideState = ERideState::Entering;
 
 	// 경유점이 있으면 거기부터 간다. 이미 그 자리에 있으면(1 cm 안) 곧장 좌석으로 간다.
 	if (ApproachWorld.IsSet() && !ApproachWorld.GetValue().Equals(GetActorLocation(), 1.0))
 	{
 		WalkTarget = ApproachWorld.GetValue();
-		PendingSeat = SeatWorld;
+		PendingWalkTarget = SeatWorld;
 	}
 
 	UE_LOG(LogLTTSGrid, Display,
@@ -473,11 +475,69 @@ void AGridPawn::WalkOntoGrid(const FVector& NearWorld, int32 SearchRadius)
 
 	LandingCell = Entry;
 	WalkTarget = CellStandLocation(Entry);
+	PendingWalkTarget.Reset();
+	bLeavingToPoint = false;
 	RideState = ERideState::Leaving;
 
 	UE_LOG(LogLTTSGrid, Display,
 		TEXT("%s: leaving %s towards cell (%d,%d)."),
 		*GetName(), *GetNameSafe(Vehicle.Get()), Entry.X, Entry.Y);
+}
+
+void AGridPawn::SitInVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent)
+{
+	if (!InVehicle)
+	{
+		return;
+	}
+
+	// BoardVehicle과 같은 정리. 탈것 위에서는 셀 경로가 의미를 잃는다.
+	Path.Reset();
+	PendingGoal.Reset();
+	PendingWalkTarget.Reset();
+	bLeavingToPoint = false;
+	bBumping = false;
+	GoalCell = CurrentCell;
+	RefreshPathDebug();
+
+	Vehicle = InVehicle;
+	RideAnchor = FollowComponent;
+	SetActorLocation(SeatWorld);
+
+	// 오프셋은 지금 잰다. 다음 틱을 기다리면 그 사이 시퀀스가 탈것을 옮겨 좌석이 밀린다.
+	RideOffset = SeatWorld - RideBaseLocation();
+	RideState = ERideState::Riding;
+
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: seated in %s at (%.0f, %.0f, %.0f)."),
+		*GetName(), *InVehicle->GetName(), SeatWorld.X, SeatWorld.Y, SeatWorld.Z);
+}
+
+void AGridPawn::LeaveVehicleTo(const FVector& ExitWorld, const TOptional<FVector>& ThroughWorld)
+{
+	if (RideState != ERideState::Riding)
+	{
+		UE_LOG(LogLTTSGrid, Warning,
+			TEXT("%s: LeaveVehicleTo ignored; the pawn is not riding anything."), *GetName());
+		return;
+	}
+
+	WalkTarget = ExitWorld;
+	PendingWalkTarget.Reset();
+	bLeavingToPoint = true;
+	RideState = ERideState::Leaving;
+
+	// 경유점(문 바로 앞)이 있으면 거기부터. 이미 그 자리면 곧장 목표로 간다.
+	if (ThroughWorld.IsSet() && !ThroughWorld.GetValue().Equals(GetActorLocation(), 1.0))
+	{
+		WalkTarget = ThroughWorld.GetValue();
+		PendingWalkTarget = ExitWorld;
+	}
+
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: leaving %s towards (%.0f, %.0f, %.0f)%s."),
+		*GetName(), *GetNameSafe(Vehicle.Get()), ExitWorld.X, ExitWorld.Y, ExitWorld.Z,
+		PendingWalkTarget.IsSet() ? TEXT(" through the door") : TEXT(""));
 }
 
 void AGridPawn::Bump(FIntPoint TowardCell)
@@ -521,17 +581,17 @@ void AGridPawn::TickStraightWalk(float DeltaSeconds)
 		AActor* Ride = Vehicle.Get();
 
 		// 좌석 앞 경유점에 닿았다. 이제 좌석으로 똑바로 들어간다.
-		if (PendingSeat.IsSet() && Ride)
+		if (PendingWalkTarget.IsSet() && Ride)
 		{
-			WalkTarget = PendingSeat.GetValue();
-			PendingSeat.Reset();
+			WalkTarget = PendingWalkTarget.GetValue();
+			PendingWalkTarget.Reset();
 			return;
 		}
 
 		if (!Ride)
 		{
 			// 걸어 들어가는 사이에 탈것이 사라졌다. 발밑에서 다시 그리드를 찾는다.
-			PendingSeat.Reset();
+			PendingWalkTarget.Reset();
 			RideState = ERideState::OnGrid;
 			RideAnchor.Reset();
 			WalkOntoGrid(GetActorLocation());
@@ -545,12 +605,40 @@ void AGridPawn::TickStraightWalk(float DeltaSeconds)
 		return;
 	}
 
-	// Leaving: 여기서부터 다시 그리드 위다.
-	CurrentCell = LandingCell;
-	GoalCell = LandingCell;
+	// Leaving: 문 앞 경유점에 닿았다. 이제 하차 목표로 간다.
+	if (PendingWalkTarget.IsSet())
+	{
+		WalkTarget = PendingWalkTarget.GetValue();
+		PendingWalkTarget.Reset();
+		return;
+	}
+
+	const FString VehicleName = GetNameSafe(Vehicle.Get());
 	Vehicle.Reset();
 	RideAnchor.Reset();
 	RideState = ERideState::OnGrid;
+
+	// LeaveVehicleTo로 월드 점에 내렸다. 셀로 걸어 들어온 것이 아니므로 셀 진입 알림(스테이지 클리어 등)을
+	// 보내지 않는다. 그리드가 있으면 발밑 셀만 기억해 둔다.
+	if (bLeavingToPoint || !Grid)
+	{
+		bLeavingToPoint = false;
+		if (Grid)
+		{
+			CurrentCell = Grid->WorldToCell(GetActorLocation());
+			GoalCell = CurrentCell;
+			RefreshPathDebug();
+		}
+
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("%s: stepped off %s at (%.0f, %.0f, %.0f)."),
+			*GetName(), *VehicleName, GetActorLocation().X, GetActorLocation().Y, GetActorLocation().Z);
+		return;
+	}
+
+	// 여기서부터 다시 그리드 위다.
+	CurrentCell = LandingCell;
+	GoalCell = LandingCell;
 
 	Grid->NotifyPawnEnteredCell(this, CurrentCell);
 	RefreshPathDebug();

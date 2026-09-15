@@ -134,6 +134,26 @@ public:
 	void WalkOntoGrid(const FVector& NearWorld, int32 SearchRadius = 8);
 
 	/**
+	 * 걷지 않고 곧바로 좌석에 앉는다.
+	 *
+	 * 하차 컷씬처럼 처음부터 탈것 안에서 시작할 때 쓴다. BoardVehicle은 Entering을 적어도 한 틱
+	 * 거치는데, 레벨 시퀀스는 액터 틱보다 먼저 평가되므로 그 사이에 탈것이 움직이면 좌석 오프셋이
+	 * 어긋난다. 여기서는 오프셋을 부르는 순간 잰다.
+	 */
+	void SitInVehicle(AActor* InVehicle, const FVector& SeatWorld, USceneComponent* FollowComponent = nullptr);
+
+	/**
+	 * 탈것에서 월드 점으로 걸어 내린다. 그리드가 없어도 된다.
+	 *
+	 * WalkOntoGrid의 그리드 없는 짝이다. 버스 정류장 컷씬 맵에는 AGridActor가 없어서 내릴 셀을
+	 * 물어볼 곳이 없다. 도착하면 OnGrid로 돌아가지만 셀은 바꾸지 않는다.
+	 *
+	 * ThroughWorld를 주면 거기(문 바로 앞)까지 먼저 나온 뒤 ExitWorld로 간다. 문 한가운데에서
+	 * 차체 면에 수직으로 나오게 하려는 것이다. 실려 있을 때(Riding)만 동작한다.
+	 */
+	void LeaveVehicleTo(const FVector& ExitWorld, const TOptional<FVector>& ThroughWorld = TOptional<FVector>());
+
+	/**
 	 * 막힌 쪽으로 살짝 부딪혔다가 되돌아온다.
 	 *
 	 * 기획의 "지나갈 수 없다는 걸 보여 주는 연출"이다. 폰이 공이라 애니메이션이 없으므로
@@ -309,11 +329,15 @@ private:
 	FVector WalkTarget = FVector::ZeroVector;
 
 	/**
-	 * Entering의 두 번째 목표(좌석). 비어 있지 않으면 지금 WalkTarget은 좌석 앞 경유점이다.
+	 * Entering·Leaving의 두 번째 목표. 비어 있지 않으면 지금 WalkTarget은 경유점이다.
 	 *
-	 * 경유점에 닿으면 이 값으로 WalkTarget을 바꾸고 비운다.
+	 * Entering에서는 좌석(경유점은 문 한가운데와 일직선인 자리), LeaveVehicleTo의 Leaving에서는
+	 * 하차 목표(경유점은 문 바로 앞)다. 경유점에 닿으면 이 값으로 WalkTarget을 바꾸고 비운다.
 	 */
-	TOptional<FVector> PendingSeat;
+	TOptional<FVector> PendingWalkTarget;
+
+	/** 지금 Leaving이 LeaveVehicleTo(월드 점)로 시작됐는지. 그러면 도착해도 LandingCell을 쓰지 않는다. */
+	bool bLeavingToPoint = false;
 
 	/** Leaving이 끝나면 서게 될 셀. */
 	FIntPoint LandingCell = FIntPoint::ZeroValue;

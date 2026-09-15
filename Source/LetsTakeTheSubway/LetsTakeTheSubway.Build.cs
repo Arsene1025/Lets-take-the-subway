@@ -15,7 +15,9 @@ public class LetsTakeTheSubway : ModuleRules
 
         PublicDependencyModuleNames.AddRange(new string[] {
             "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput",
-            "UMG", "Slate", "SlateCore"
+            "UMG", "Slate", "SlateCore",
+            // The bus stop cutscene (Cutscene/BusStopCutsceneDirector) plays level sequences.
+            "LevelSequence", "MovieScene"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[] {  });
