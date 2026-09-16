@@ -25,6 +25,12 @@ ACameraActor* AStageInfo::GetZoneCamera(int32 ZoneIndex) const
 	return ZoneCameras.IsValidIndex(ArrayIndex) ? ZoneCameras[ArrayIndex].Get() : nullptr;
 }
 
+int32 AStageInfo::GetPathUIIndex(int32 ZoneIndex) const
+{
+	const int32 ArrayIndex = ZoneIndex - 1;
+	return ZonePathUIIndices.IsValidIndex(ArrayIndex) ? ZonePathUIIndices[ArrayIndex] : INDEX_NONE;
+}
+
 void AStageInfo::BeginPlay()
 {
 	Super::BeginPlay();

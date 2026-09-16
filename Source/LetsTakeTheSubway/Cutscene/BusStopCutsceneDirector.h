@@ -122,16 +122,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Bus Stop Cutscene", meta = (ClampMin = 0.0))
 	float FadeOutSeconds = 1.0f;
 
-	/**
-	 * 이 맵에 있는 동안 Virtual Shadow Map 캐시(r.Shadow.Virtual.Cache)를 끈다.
-	 *
-	 * 시퀀스로 달리는 버스의 그림자가 바닥에 잔상으로 남는 문제를 막는다. 스켈레탈 메시라
-	 * Shadow Cache Invalidation Behavior로는 잡히지 않았고, 캐시를 끄면 사라지는 것을 확인했다.
-	 * 컷씬 맵은 작아서 캐시 없이도 비용이 거의 없다. 레벨을 떠날 때(EndPlay) 원래 값으로 되돌린다.
-	 */
-	UPROPERTY(EditAnywhere, Category = "Bus Stop Cutscene")
-	bool bDisableShadowCacheWhileHere = true;
-
 	/** 좌석이 차체 끝에서 떨어져야 하는 거리(cm). 좌석은 차체 반길이에서 이 값을 뺀 범위 안에 선다. */
 	UPROPERTY(EditAnywhere, Category = "Bus Stop Cutscene", meta = (ClampMin = 0.0))
 	float SeatEndMargin = 100.0f;
@@ -229,10 +219,4 @@ private:
 
 	FTimerHandle OpenLevelTimer;
 
-	/** bDisableShadowCacheWhileHere: BeginPlay에서 캐시를 끄고, EndPlay에서 저장해 둔 값으로 되돌린다. */
-	void DisableShadowCache();
-	void RestoreShadowCache();
-
-	/** 캐시를 끄기 전 r.Shadow.Virtual.Cache 값. 되돌릴 게 없으면 -1. */
-	int32 SavedShadowCacheValue = -1;
 };

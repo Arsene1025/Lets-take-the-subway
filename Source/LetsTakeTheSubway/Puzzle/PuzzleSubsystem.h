@@ -100,6 +100,15 @@ public:
 	APuzzleElevatorDock* FindDockUnder(const APuzzleElevatorBlock& Elevator) const;
 
 	/**
+	 * 이 블록을 완전히 담고 있는 바닥 타일. 없으면 null.
+	 *
+	 * 타일은 겹치지 않으므로 "첫 번째"는 사실상 "유일한"이다. 드래그 중 자동 정지
+	 * (APuzzleBlock::bParkOnFloorTile)와 멈춘 뒤의 반응 판정이 같은 답을 봐야 하므로,
+	 * 양쪽 모두 이 함수를 쓴다.
+	 */
+	APuzzleFloorTile* FindTileContaining(const APuzzleBlock& Block) const;
+
+	/**
 	 * 이 셀이 어느 엘리베이터 구조물 위인지. 즉 샤프트 셀인지.
 	 *
 	 * 사각 영역이 아니라 셀 하나로 묻는 이유는 차체가 한 칸씩 움직이기 때문이다. 위층에서

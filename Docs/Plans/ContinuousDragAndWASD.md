@@ -88,12 +88,46 @@
 `GrabOffset`(블록 중심 기준의 그랩 오프셋)은 사라졌다. 블록이 커서를 따라다니던 시절에는
 잡은 자리를 유지하려고 필요했지만, 이제 커서가 방향만 가리키므로 식에서 상쇄된다.
 
+## 2.5 바닥 타일 위 자동 정지 (2026-09-16)
+
+**왜.** 엘리베이터를 회전판이나 구조물에 정확히 맞추기 어렵다는 피드백이 왔다. 연속 드래그는
+막힐 때까지 정속으로 미는 것이라, 딱 맞는 칸을 손으로 찾아 세워야 했다. 이제는 조각이 스스로
+걸린다.
+
+**규칙.** `APuzzleBlock::bParkOnFloorTile`을 켠 조각은, 드래그 도중 바닥 타일에 **정확히
+들어맞는 칸**(`APuzzleFloorTile::FullyContains`)에 닿는 순간 멈추고 그 드래그에서는 더 가지
+않는다. 놓았다가 다시 잡으면 평소처럼 움직이므로 타일을 지나가는 길이 막히지는 않는다.
+엘리베이터(`APuzzleElevatorBlock`)가 기본으로 켜고, 벤치처럼 작은 조각은 켜지 않는다 — 4x4
+회전판 안에 여러 위치로 들어갈 수 있어 칸마다 걸리면 성가시다.
+
+**들어서는 순간만 잡는다.** `LastTileUnder`에 지난 칸의 타일을 기록해 두고, 그것과 달라졌을
+때만 건다. 그래서 (가) 이미 타일 위에서 드래그를 시작하면 걸리지 않고, (나) 같은 타일 안에서
+칸을 옮기는 동안에도 걸리지 않으며, (다) 나갔다가 다시 들어오면 다시 걸린다. null도 기록한다.
+
+**회전은 여전히 놓을 때 난다.** 걸린 것과 반응하는 것은 다른 일이다. 잡은 채로 회전시키면
+블록이 커서 아래에서 돌아 빠져나간다(`PuzzleBlock.h`의 `SetHeld` 주석). 구조물의 도킹은
+`APuzzleElevatorDock::Tick`이 매 틱 다시 판정하므로 멈추는 즉시 패드 색이 바뀐다.
+
+**코드.**
+
+| 파일 | 변경 |
+|---|---|
+| `Puzzle/PuzzleBlock.h/.cpp` | `bParkOnFloorTile`, `IsParkedOnTile()`, `bParkedOnTile`, `LastTileUnder`, `CheckParkOnTile()`. `SetHeld`가 잡고 놓을 때 상태를 초기화하고, `Tick`의 슬라이드 예산 루프가 칸에 도착할 때마다 검사한다 |
+| `Puzzle/PuzzleSubsystem.h/.cpp` | `FindTileContaining(const APuzzleBlock&)` 공개. `NotifyBlockCameToRest`도 같은 헬퍼를 쓴다 — 걸리는 판정과 반응하는 판정이 갈라지면 안 된다 |
+| `Player/GridPlayerController.cpp` | `UpdateDrag`의 `bOneStepPerDrag` 가드 옆에 `IsParkedOnTile()` 가드 |
+| `Puzzle/PuzzleElevatorBlock.cpp` | 생성자에서 `bParkOnFloorTile = true` |
+
+**검사를 다음 칸 이어 붙이기 앞에 두는 이유.** 슬라이드 루프는 한 프레임에 여러 칸을 감을 수
+있다. 뒤로 미루면 걸려야 할 자리를 같은 프레임에 그대로 지나친다.
+
 ## 3. 콘솔
 
 | 명령 | 하는 일 |
 |---|---|
 | `ltts.PawnStep <N\|E\|S\|W>` | 이동 키를 한 번 눌렀다 뗀 것과 같다. 키보드와 같은 함수(`StepOnce` → `TryStepHeldDirection`)를 지난다 |
 | `ltts.BlockSlide <이름 일부> <N\|E\|S\|W>` | 기존 명령. 블록을 한 칸 민다 |
+| `ltts.BlockDrag <이름 일부> <N\|E\|S\|W>` | 쥔 채로 계속 미는 드래그를 흉내 낸다. 막히거나 타일에 걸릴 때까지 간다. 자동 정지는 드래그 중에만 일어나므로 마우스 없이 확인할 방법이 이것뿐이다. 컨트롤러와 같이 걸린 조각은 밀지 않는다 |
+| `ltts.BlockRelease [이름 일부]` | 위를 놓는다. 마지막 걸음이 끝난 자리에서 타일이 반응한다 |
 
 ## 4. 검증
 
@@ -118,6 +152,14 @@ PIE 체크리스트 (`Subway_Stage1` 또는 `GreyBoxTest_1`):
 - [ ] 막히면 사유가 한 번만 뜬다. 뗐다 다시 잡지 않아도 다른 쪽으로 이어 밀 수 있다.
 - [ ] 주축이 막힌 블록이 벽을 따라 끊김 없이 미끄러진다.
 - [ ] 회전판 위에 놓고 떼면 회전이 지금처럼 발동한다(`ReportAtRest`).
+- [x] 엘리베이터를 회전판 쪽으로 계속 끌면 정확히 겹치는 칸에서 스스로 선다. 커서를 더 밀어도
+      움직이지 않는다. (2026-09-16 PIE: `PuzzleElevatorBlock_1`이 셀 (115,5)에서 30칸을 가
+      `PuzzleRotationTile_1`의 (115,35)에 정확히 서고 `lined up with ...` 로그를 남겼다)
+- [x] 놓으면 회전이 돈다. (같은 PIE: 놓은 뒤 북쪽이 "This block does not move that way"로
+      거부됐다 — 문 축이 90도 돌았다는 뜻)
+- [x] 다시 잡고 끌면 그 타일에서 빠져나가고, 다음 타일에서 다시 선다. (같은 PIE: 서쪽으로
+      끌어 (106,35)의 `PuzzleRotationTile_0`에 다시 걸렸다)
+- [ ] 벤치·자판기 같은 일반 블록은 회전판 위를 그냥 지나간다(`bParkOnFloorTile` 꺼짐).
 - [ ] 엘리베이터도 문 축을 따라 연속으로 밀린다. 타고 있으면 거부된다.
 - [ ] W=화면 왼쪽 위, D=오른쪽 위, S=오른쪽 아래, A=왼쪽 아래. 화살표 키도 같다.
 - [ ] 키를 누르고 있으면 막힐 때까지 정속으로 걷는다. HUD의 `[holding ...]`이 맞는 축을 가리킨다.

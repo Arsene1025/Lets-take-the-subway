@@ -7,9 +7,11 @@
 #include "Grid/GridFootprint.h"
 #include "Grid/GridTypes.h"
 #include "Puzzle/PuzzleTypes.h"
+#include "Sound/SoundKeys.h"
 #include "PuzzleBlock.generated.h"
 
 class AGridActor;
+class APuzzleFloorTile;
 class APuzzleRegion;
 class UChildActorComponent;
 class UPuzzleSubsystem;
@@ -133,6 +135,28 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
 	bool bOneStepPerDrag = false;
+
+	/**
+	 * 드래그 도중 바닥 타일(회전판·엘리베이터 구조물)에 **정확히 들어맞는 칸**에 닿으면
+	 * 거기서 멈추고, 플레이어가 놓았다가 다시 잡을 때까지 더 가지 않는다.
+	 *
+	 * 엘리베이터가 기본으로 켠다(2026-09-16). 차체를 구조물이나 회전판에 정확히 맞추기가
+	 * 어렵다는 피드백에서 나온 것으로, 딱 맞는 자리를 손으로 찾는 대신 조각이 스스로 걸린다.
+	 * 한 번 더 드래그하면 그대로 빠져나갈 수 있으므로 지나가는 길이 막히지는 않는다.
+	 *
+	 * 벤치 같은 작은 조각에는 켜지 않는다. 4x4 회전판 안에 여러 위치로 들어갈 수 있어
+	 * 칸마다 걸리면 오히려 성가시다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block")
+	bool bParkOnFloorTile = false;
+
+	/** 한 칸 밀릴 때마다 내는 소리(DA_SoundLibrary 키). None이면 소리 없음. */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Sound")
+	FName SlideSoundKey = LTTSSoundKeys::PuzzleSlide;
+
+	/** 막힌 쪽으로 끌었을 때 내는 소리. 거부 한 방향당 한 번(AGridPlayerController::UpdateDrag). */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Sound")
+	FName JamSoundKey = LTTSSoundKeys::PuzzleJam;
 
 	/**
 	 * 그레이박스 큐브 대신 보여 줄 아트 액터. 비워 두면 지금까지처럼 큐브를 그린다.
@@ -287,6 +311,13 @@ public:
 	bool CanSlide(EGridDirection Dir, FText* OutReason = nullptr) const;
 
 	/**
+	 * 바닥 타일 위에 걸려 이번 드래그에서는 더 움직이지 않는 상태면 true.
+	 *
+	 * 컨트롤러가 이것을 보고 미는 것을 멈춘다. 놓으면(SetHeld(false)) 지워진다.
+	 */
+	bool IsParkedOnTile() const { return bParkedOnTile; }
+
+	/**
 	 * 조각 자신의 사정으로 지금 움직일 수 없으면 false.
 	 *
 	 * 목적지와 무관한 이유를 위한 자리다. 엘리베이터는 누가 타고 있으면 거부한다.
@@ -435,6 +466,14 @@ private:
 	/** 회전 타일이 반응할 수 있도록 블록이 정지했음을 서브시스템에 알린다. */
 	void ReportAtRest();
 
+	/**
+	 * 지금 칸에서 바닥 타일에 딱 들어맞았는지 보고, 그렇다면 멈춘다.
+	 *
+	 * 걸렸으면 true. 타일에 **들어서는** 순간만 잡는다(LastTileUnder) -- 이미 타일 위에서
+	 * 드래그를 시작했거나 같은 타일 안에서 칸을 옮기는 동안에는 걸리지 않는다.
+	 */
+	bool CheckParkOnTile();
+
 	EAnimState AnimState = EAnimState::Idle;
 
 	// --- CUTAWAY DISABLED 2026-09-04 ---
@@ -448,6 +487,17 @@ private:
 	double FloorZ = 0.0;
 
 	bool bHeld = false;
+
+	/** 이번 드래그에서 타일에 걸려 멈췄다. 놓을 때까지 컨트롤러가 더 밀지 않는다. */
+	bool bParkedOnTile = false;
+
+	/**
+	 * 지난 칸에서 이 조각을 담고 있던 타일. 없었으면 null.
+	 *
+	 * "타일에 들어서는 순간"만 잡아내기 위한 것이다. 이미 타일 위에서 드래그를 시작했거나
+	 * 같은 타일 안에서 칸을 옮기는 동안에는 걸리지 않고, 나갔다 다시 들어오면 다시 걸린다.
+	 */
+	TWeakObjectPtr<APuzzleFloorTile> LastTileUnder;
 
 	/** 블록을 잡은 뒤 이동한 걸음 수. 놓을 때 0이면 드래그가 아니라 클릭이었다는 뜻이다. */
 	int32 StepsWhileHeld = 0;

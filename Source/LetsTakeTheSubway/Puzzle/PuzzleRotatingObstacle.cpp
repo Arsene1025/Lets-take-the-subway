@@ -8,6 +8,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleElevatorBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -693,6 +694,11 @@ bool APuzzleRotatingObstacle::TryRotate(int32 TurnSign, FText* OutReason)
 	const FVector Pivot = GetPivotWorld();
 
 	BeginRotation(Pivot, Sign, RotateDuration, Destination);
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(RotateSoundKey, GetRootComponent());
+	}
 	for (int32 Index = 0; Index < Riders.Num(); ++Index)
 	{
 		Riders[Index]->BeginRotation(Pivot, Sign, RotateDuration, RiderDestinations[Index]);

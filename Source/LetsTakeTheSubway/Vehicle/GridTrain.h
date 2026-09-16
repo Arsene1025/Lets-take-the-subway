@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Sound/SoundKeys.h"
+#include "UI/Guide/GuideType.h"
 #include "GridTrain.generated.h"
 
 class AGridActor;
@@ -11,6 +13,7 @@ class AGridNPC;
 class AGridNPCSpawner;
 class AGridPawn;
 class UAnimSequenceBase;
+class UAudioComponent;
 class UAnimationAsset;
 class UCurveFloat;
 class UMaterialInterface;
@@ -82,6 +85,58 @@ struct FGridTrainStop
 
 	UPROPERTY(EditAnywhere, Category = "Train Stop", meta = (ClampMin = 0, ClampMax = 32))
 	int32 DisembarkCount = 3;
+
+	/**
+	 * 이 역으로 들어올 때 알림음·진입음·정차음을 낼지.
+	 *
+	 * 알림음은 위치 없이(2D) 나므로 화면 밖 회차역으로 들어올 때도 들린다. 플레이어가 볼 일이 없는
+	 * 역은 끈다. 문 소리는 열차에 붙어 있어 거리로 줄어들므로 이 값과 상관없이 난다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train Stop|Sound")
+	bool bArrivalSounds = true;
+
+	/**
+	 * 플레이어가 이 역에서 내린 뒤 처음으로 이동 입력(이동키, 바닥 클릭)을 했을 때 요청할 가이드 팝업.
+	 * None이면 없음(2026-09-16). 내린 뒤 PostExitCell까지 열차가 시키는 자동 걸음은 입력이 아니다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train Stop|UI")
+	EGuideType GuideOnFirstMoveAfterExit = EGuideType::None;
+};
+
+/**
+ * 열차가 내는 소리의 키. 기본값은 표준 키이고, 열차마다 다른 소리를 쓰려면 DA_SoundLibrary에 키를
+ * 더한 뒤 여기서 바꾼다. None이면 그 소리를 내지 않는다.
+ */
+USTRUCT(BlueprintType)
+struct FTrainSoundKeys
+{
+	GENERATED_BODY()
+
+	/** 역으로 들어오기 전 승강장 알림음. 2D. */
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName Notification = LTTSSoundKeys::TrainNotification;
+
+	/** 진입음. 열차에 붙는다. */
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName Approach = LTTSSoundKeys::TrainApproach;
+
+	/** 정차음. 열차에 붙는다. */
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName Stop = LTTSSoundKeys::TrainStop;
+
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName DoorOpen = LTTSSoundKeys::TrainDoorOpen;
+
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName DoorClose = LTTSSoundKeys::TrainDoorClose;
+
+	/** 플레이어가 타고 이동하는 동안의 루프. 2D. */
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName Inside = LTTSSoundKeys::TrainInside;
+
+	/** 플레이어가 타고 있을 때 문이 열리기 시작하면 나는 하차 안내 방송. 2D. */
+	UPROPERTY(EditAnywhere, Category = "Sound")
+	FName ArrivalAnnouncement = LTTSSoundKeys::TrainArrivalAnnouncement;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTrainDoorsOpened, AGridTrain*, Train, FName, StopName);
@@ -303,6 +358,38 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Train|Motion", meta = (ClampMin = 0.001, ClampMax = 1.0))
 	float MinSpeedFactor = 0.25f;
 
+	// ---------------------------------------------------------------- 사운드
+
+	UPROPERTY(EditAnywhere, Category = "Train|Sound")
+	FTrainSoundKeys SoundKeys;
+
+	/**
+	 * 도착까지 남은 거리가 이 값(cm) 이하가 되면 알림음을 낸다. 0이면 출발하자마자.
+	 *
+	 * 세 거리 값은 모두 구간의 도착점에서 거꾸로 잰다. 구간 길이보다 크면 출발 순간에 난다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Sound", meta = (ClampMin = 0.0))
+	float NotificationDistance = 0.0f;
+
+	/**
+	 * 남은 거리가 이 값(cm) 이하가 되면 진입음을 낸다. 0이면 출발하자마자.
+	 *
+	 * 진입음(WAV_01)은 10초 가까운 원샷이다. Stage1 구간(50 m, 약 8초)에는 0이 맞고, 열차가 화면
+	 * 밖 먼 곳에서 출발하는 긴 구간은 값을 올려 화면에 잡히는 지점에 맞춘다. 문이 열리기 시작할 때
+	 * 아직 나고 있으면 짧게 페이드 아웃한다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Sound", meta = (ClampMin = 0.0))
+	float ApproachSoundDistance = 0.0f;
+
+	/**
+	 * 남은 거리가 이 값(cm) 이하가 되면 정차음("고오오오 착", 약 2.3초)을 낸다.
+	 *
+	 * 끝의 "착"이 멈추는 순간에 맞도록 감속 구간보다 조금 앞에서 시작한다. 속도·감속 비율을 바꾸면
+	 * 함께 맞춘다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train|Sound", meta = (ClampMin = 0.0))
+	float StopSoundDistance = 1500.0f;
+
 	/** 문이 열렸을 때 발생한다. 하차 연출을 여기에 매달 수 있다. */
 	UPROPERTY(BlueprintAssignable, Category = "Train")
 	FOnTrainDoorsOpened OnDoorsOpened;
@@ -516,6 +603,9 @@ private:
 	/** 방금 내린 폰이 그리드에 다시 선 뒤 걸어갈 셀. 없으면 (-1,-1). */
 	FIntPoint UnloadedGoalCell = FIntPoint(-1, -1);
 
+	/** 방금 내린 역의 GuideOnFirstMoveAfterExit. 폰이 그리드에 다시 서면 가이드 서브시스템에 걸어 둔다. */
+	EGuideType UnloadedGuide = EGuideType::None;
+
 	/**
 	 * ArtMesh에 마지막으로 지정한 애니메이션.
 	 *
@@ -543,6 +633,22 @@ private:
 
 	/** 열차가 서는 높이. BeginPlay에서 배치된 Z를 기록한다. */
 	double TrackZ = 0.0;
+
+	// ---------------------------------------------------------------- 사운드 상태
+
+	/** 남은 거리를 보고 알림음·진입음·정차음을 구간마다 한 번씩 낸다. Moving 틱마다 부른다. */
+	void UpdateArrivalSounds();
+
+	/** 플레이어가 탄 채 이동하는 동안의 루프를 멈춘다. */
+	void StopInsideSound(float FadeOutSeconds);
+
+	TWeakObjectPtr<UAudioComponent> ApproachAudio;
+	TWeakObjectPtr<UAudioComponent> InsideAudio;
+
+	/** 이번 구간에서 도착 소리를 이미 냈는지. EnterMoving에서 비운다. */
+	bool bNotificationPlayed = false;
+	bool bApproachPlayed = false;
+	bool bStopSoundPlayed = false;
 
 	float PhaseTimer = 0.0f;
 

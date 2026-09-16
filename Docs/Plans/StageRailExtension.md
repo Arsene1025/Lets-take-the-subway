@@ -233,3 +233,69 @@
 - 실제로 열차를 타고 내리는 흐름: Stage1 동쪽 → 서쪽, Stage2 A′ → B, D → C. 하차 셀이 승강장 가장자리와 가까워 폰이 벽에 걸리지 않는지.
 - Stage2에서 한 칸 옮긴 블록 4개가 아트 배치와 1 m 어긋나 보이는지.
 - 아트 요청(선택): Stage2 A′·D 승강장과 선로 사이 3.4 m 틈, 서쪽 역 L1 그룹의 40/25 cm 어긋남.
+
+---
+
+## 6. Stage2 열차 `Stops` 유실과 복구 (2026-09-16)
+
+### 6.1 증상
+
+Stage2를 플레이하면 두 열차가 레벨에서 사라지고 승강장에 오지 않았다. PIE 로그(`LogLTTSGrid`):
+
+```
+BP_Train_Subway_S2_C_0: stop 0 'None' has no boarding cells; the player cannot board there.
+BP_Train_Subway_S2_C_0: 2 stops, 2990 cm/s, doors opening 2.0 s / open 5.0 s / closing 2.0 s, loop on.
+```
+
+같은 세션의 Stage1은 `stop 0 'Platform_B2_East': 20 boarding cell(s)`로 정상이었다.
+
+### 6.2 원인
+
+`Subway_Stage2.umap`에서 `Train_Line1`·`Train_Line2`의 `Stops` 배열 **내용만** 기본값으로 초기화돼 있었다.
+`StopName`은 `None`, `StopCell`은 (0,0), `ExitCell`은 (−1,−1). 열차는 BeginPlay에서 `Stops[0]`의 셀로
+스냅하므로 두 대 모두 그리드 원점 근처(월드 −35777, −5274)로 순간이동해 시야에서 사라졌다.
+`Speed`(2990 / 3910), yaw(90 / 180), 배치 위치처럼 액터 본체의 값은 전부 살아 있었다.
+
+유실 커밋은 `1e40e7f` "스테이지 2 에셋 교체 중"(2026-09-16 11:28, jiminan-jpg)이다. 맵 바이너리의
+이름 테이블에서 `S2_PlatformA`~`D` 문자열이 `5dac0bb`까지는 4개 모두 있다가 `1e40e7f`에서 0개가 된다.
+`Subway_Stage2_BackUp.umap`에는 남아 있다.
+
+지하철 아트 애니메이션 작업(`bb03291`, 2026-09-15)은 `BP_Train_Subway`·`BP_Train_Subway_S2` 두
+블루프린트만 고쳤고 Stage2 맵은 건드리지 않았다. `FGridTrainStop`의 멤버도 그대로다(주석만 바뀜).
+
+### 6.3 복구 (에디터 MCP, 저장 완료)
+
+5.1의 값을 그대로 다시 적었다. 그리드(`StationGrid` (−35827, −5324, 8070), 390×278, 셀 100 cm)는
+그대로여서 셀 번호가 유효하다.
+
+| 열차 | 정차역 | `StopCell` | `ExitCell` | 월드 (셀 중심) |
+|---|---|---|---|---|
+| `Train_Line1` | `S2_PlatformA` | (378, 65) | (368, 65) | (2023, 1226) |
+| | `S2_PlatformB` | (378, 241) | (368, 241) | (2023, 18826) |
+| `Train_Line2` | `S2_PlatformD` | (22, 267) | (22, 258) | (−33577, 21426) |
+| | `S2_PlatformC` | (252, 267) | (252, 258) | (−10577, 21426) |
+
+`BoardingCells`는 비워 자동 계산에 맡기고, `PostExitCell` (−1,−1)·`DisembarkCount` 3·`bArrivalSounds`
+켬은 이전과 같다. Stage2에는 `AGridNPCSpawner`가 없어 `DisembarkSpawner`는 네 역 모두 비어 있다.
+
+### 6.4 블루프린트 점검 (변경 없음)
+
+`BP_Train_Subway_S2`는 이미 Stage1(`BP_Train_Subway`)과 같은 구성이다. 스켈레탈 메시 `SM_Subway_001`,
+문 열림·닫힘·바퀴 애니메이션 3종, `bMatchDoorTimingToAnimation` 켬, `AnimationSingleNode` +
+`AlwaysTickPoseAndRefreshBones`, 컴포넌트 `SceneRoot`·`ArtMesh`·`BodyMesh`·`DoorMesh0/1`.
+스테이지마다 다른 것은 아래뿐이고, 머티리얼은 요청대로 Stage2 것을 유지했다.
+
+| 항목 | S1 | S2 |
+|---|---|---|
+| `ArtMesh` 위치 / 스케일 | (−2239, −25, −54) / (1.5, 1.5, 1.3) | (−2089.73, −28, −58.15) / (1.4, 1.68, 1.4) |
+| `BodyLength` / `Width` / `Height` | 4525 / 600 / 727 | 4223 / 672 / 783 |
+| `DoorOffsetsLocal` / `DoorWidth` | [−1608.5, −739, 704, 1574] / 390 | [−1501.3, −689.7, 657.1, 1469.1] / 364 |
+| `WheelAnimSpeedAtRate1` | 500 | 540 |
+| `ArtFallbackMaterial` | `MI_ToonSurface_Level001` | **`MI_ToonSurface_Level003`** |
+
+### 6.5 남은 것
+
+- PIE 확인: 사용자가 Stage1 PIE 중이어서 Stage2로는 아직 돌려 보지 못했다. Stage2를 열고 플레이해
+  `stop 0 'S2_PlatformA': N boarding cell(s)`가 다시 찍히는지, A′ → B / D → C 왕복이 되는지 확인이 필요하다.
+- 재발 방지: 아트 브랜치에서 맵을 저장할 때 열차 `Stops` 같은 저작값이 초기화되지 않는지 확인이 필요하다.
+  맵 병합·저장 뒤에는 이름 테이블에 `S2_PlatformA`~`D`가 남아 있는지 보는 것으로 빠르게 점검할 수 있다.

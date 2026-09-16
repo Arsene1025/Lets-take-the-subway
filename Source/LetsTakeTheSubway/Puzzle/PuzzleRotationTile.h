@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Puzzle/PuzzleFloorTile.h"
 #include "Puzzle/PuzzleTypes.h"
+#include "Sound/SoundKeys.h"
 #include "PuzzleRotationTile.generated.h"
 
 class APuzzleBlock;
@@ -41,6 +42,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Rotation Tile", meta = (ClampMin = 0.05))
 	float RotateDuration = 0.4f;
+
+	/** 공간이 돌기 시작할 때 내는 소리(DA_SoundLibrary 키). 거부된 회전에는 나지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Rotation Tile|Sound")
+	FName RotateSoundKey = LTTSSoundKeys::PuzzleTileRotate;
 
 	bool IsRotating() const { return bRotating; }
 
