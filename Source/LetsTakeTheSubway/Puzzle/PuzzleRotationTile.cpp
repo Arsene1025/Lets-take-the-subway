@@ -8,6 +8,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -17,7 +18,25 @@
 
 APuzzleRotationTile::APuzzleRotationTile()
 {
-	CornerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CornerMesh"));
+	// 회전판의 아트. 메시는 400 cm(4셀)로 만들어져 있어 기본 4x4에서 배율이 1이 된다.
+	// 두께가 5 cm뿐이라 Z는 그레이박스 패드와 같은 5 cm에 띄운다 -- 에디터 그리드 오버레이
+	// (바닥에서 2 cm)와 같은 평면을 피하기 위해서다.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlateFinder(
+		TEXT("/Game/Art/JW_asset/SM_EV_PLATE001.SM_EV_PLATE001"));
+	if (PlateFinder.Succeeded())
+	{
+		ArtMesh = PlateFinder.Object;
+		ArtMeshOffset = FTransform(FVector(0.0, 0.0, 5.0));
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PlateMaterialFinder(
+		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_F0.MI_GreyBox_F0"));
+	if (PlateMaterialFinder.Succeeded())
+	{
+		ArtMaterial = PlateMaterialFinder.Object;
+	}
+
+	/*CornerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CornerMesh"));
 	CornerMesh->SetupAttachment(SceneRoot);
 	CornerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CornerMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -34,7 +53,7 @@ APuzzleRotationTile::APuzzleRotationTile()
 	if (MaterialFinder.Succeeded())
 	{
 		CornerMesh->SetMaterial(0, MaterialFinder.Object);
-	}
+	}*/
 }
 
 // ------------------------------------------------------------------------ 생명주기
@@ -71,13 +90,13 @@ void APuzzleRotationTile::RefreshVisual()
 {
 	Super::RefreshVisual();
 
-	if (CornerMesh)
+	/*if (CornerMesh)
 	{
 		const double CellSize = GetGrid() ? GetGrid()->CellSize : 100.0;
 		const double Inset = (SizeInCells - 1) * CellSize * 0.5;
 		CornerMesh->SetRelativeLocation(FVector(Inset, Inset, 14.0));
 		CornerMesh->SetRelativeScale3D(FVector(CellSize / 200.0, CellSize / 200.0, 0.12));
-	}
+	}*/
 }
 
 FString APuzzleRotationTile::DescribeTile() const
@@ -262,6 +281,11 @@ bool APuzzleRotationTile::TryRotate(FText* OutReason)
 
 	bRotating = true;
 	RotationElapsed = 0.0f;
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAtLocation(RotateSoundKey, PivotWorld);
+	}
 
 	// 거부된 회전은 순서를 소모하지 않는다: 검사 패스가 돌려보낸 뒤에는 여기까지 오지 못한다.
 	// 그래야 바닥이 모자라 한 번 막혔다고 해서 다음 방향이 뒤집히지 않는다.

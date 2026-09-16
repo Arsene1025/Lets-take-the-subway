@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Puzzle/PuzzleBlock.h"
+#include "Sound/SoundKeys.h"
 #include "PuzzleRotatingObstacle.generated.h"
 
 class APuzzleLever;
@@ -44,6 +45,19 @@ public:
 	/** 90도 회전 한 번에 걸리는 시간(초). 덩치가 크므로 일반 블록보다 느리다. */
 	UPROPERTY(EditAnywhere, Category = "Rotating Obstacle", meta = (ClampMin = 0.05))
 	float RotateDuration = 0.6f;
+
+	/** 돌기 시작할 때 내는 소리(DA_SoundLibrary 키). 기둥(APuzzleRotatingPillar)도 이것을 쓴다. */
+	UPROPERTY(EditAnywhere, Category = "Rotating Obstacle|Sound")
+	FName RotateSoundKey = LTTSSoundKeys::PuzzlePillarRotate;
+
+	/**
+	 * 레버를 돌렸지만 걸려서 돌지 못할 때 내는 소리(APuzzleLever::TryTurn).
+	 *
+	 * 부모의 JamSoundKey(블록을 막힌 쪽으로 끌 때)와 이름이 다른 이유는 사건이 다르기 때문이다. 회전
+	 * 장애물은 끌리지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Rotating Obstacle|Sound")
+	FName RotateJamSoundKey = LTTSSoundKeys::PuzzlePillarJam;
 
 	/** 홈 안쪽 빗금 면의 높이. 본체 높이에 대한 비율이다. */
 	UPROPERTY(EditAnywhere, Category = "Rotating Obstacle", meta = (ClampMin = 0.0, ClampMax = 1.0))

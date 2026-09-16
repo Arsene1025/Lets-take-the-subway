@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Puzzle/PuzzleTypes.h"
 #include "Stage/StageTypes.h"
+#include "Sound/SoundKeys.h"
 #include "GridPlayerController.generated.h"
 
 class AGridActor;
@@ -232,6 +233,15 @@ public:
 	 */
 	bool RequestElevatorBoarding(APuzzleElevatorBlock* Elevator);
 
+	/**
+	 * "저 열차를 타겠다"는 요청. 차체를 클릭하는 것과 같은 뜻이다.
+	 *
+	 * 클릭 경로와 콘솔 명령(ltts.TrainRide)이 이 하나를 공유한다. 엘리베이터와 같은 이유다.
+	 *
+	 * @return 폰이 문 앞으로 출발했거나 그 자리에서 기다리기 시작했으면 true.
+	 */
+	bool RequestTrainBoarding(AGridTrain* Train);
+
 	bool IsDraggingBlock() const { return DraggedBlock.IsValid(); }
 
 	bool IsDraggingLever() const { return DraggedLever.IsValid(); }
@@ -258,6 +268,15 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	float KeyboardYawOffset = -45.0f;
 
+	/**
+	 * 월드를 클릭(마우스 왼쪽 누름)할 때 내는 소리(DA_SoundLibrary 키). None이면 소리 없음.
+	 *
+	 * UMG 버튼 클릭 소리는 여기가 아니라 버튼 스타일의 Pressed Sound에 넣는다. UI 위의 클릭은 이 컨트롤러의
+	 * 입력으로 오지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Input|Sound")
+	FName ClickSoundKey = LTTSSoundKeys::UIClick;
+
 private:
 	/** 구역이 바뀌었으면 그 구역 카메라로 옮긴다. 레벨 시작 판정 때는 보간 없이 곧바로 붙인다. */
 	UFUNCTION()
@@ -276,6 +295,20 @@ private:
 
 	/** 마지막으로 카메라를 맞춘 구역. INDEX_NONE이면 아직 레벨 시작 판정 전이다. */
 	int32 AppliedZoneIndex = INDEX_NONE;
+
+	/**
+	 * 입력을 막는 UI가 열렸다(UUIManagerSubsystem::OnUIOpened, 2026-09-16). 입력 모드는 UI 매니저가 바꾸고,
+	 * 여기서는 누르고 있던 이동키·드래그·누름 판정·호버를 정리한다.
+	 */
+	UFUNCTION()
+	void HandleUIOpened();
+
+	/** 입력을 막는 UI가 닫혔다. 열린 UI가 더 없으면 입력을 다시 받는다. */
+	UFUNCTION()
+	void HandleUIClosed();
+
+	/** 입력을 막는 UI가 열려 있는 동안 true. 클릭·이동키·드래그·호버를 무시한다. */
+	bool bUIBlocksInput = false;
 
 	void OnPressed();
 	void OnReleased();

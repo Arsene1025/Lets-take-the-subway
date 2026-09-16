@@ -266,6 +266,14 @@ void UStageSubsystem::ValidateLayout() const
 			}
 		}
 
+		// PathUI 그림 번호(2026-09-16). 비워 둔 스테이지는 PathUI를 쓰지 않는다는 뜻이라 알리지 않는다.
+		if (!Info->ZonePathUIIndices.IsEmpty() && NumZones > 0 && Info->ZonePathUIIndices.Num() != NumZones)
+		{
+			UE_LOG(LogLTTSGrid, Warning,
+				TEXT("StageSubsystem: %s lists %d PathUI indices for %d zones. Zones without an entry keep the previous PathUI image."),
+				*Info->GetName(), Info->ZonePathUIIndices.Num(), NumZones);
+		}
+
 		for (const TObjectPtr<ACameraActor>& Camera : Info->ZoneCameras)
 		{
 			if (Camera && Camera->GetAutoActivatePlayerIndex() != INDEX_NONE)

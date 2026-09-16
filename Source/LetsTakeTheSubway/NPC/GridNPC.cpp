@@ -526,6 +526,10 @@ void AGridNPC::Tick(float DeltaSeconds)
 		CurrentCell = NextCell;
 		Path.RemoveAt(0);
 
+		// 개찰구 소리처럼 셀 단위로 반응하는 액터가 행인도 보게 한다. StageClear 처리는 AGridPawn만
+		// 받으므로 행인이 불러도 클리어가 일어나지 않는다(AGridTestGameMode, APuzzleElevatorDock).
+		Grid->NotifyPawnEnteredCell(this, NextCell);
+
 		if (Waypoints.IsValidIndex(NextWaypointIndex) && Waypoints[NextWaypointIndex] == NextCell)
 		{
 			++NextWaypointIndex;

@@ -9,6 +9,7 @@
 #include "Player/GridPawn.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -167,14 +168,16 @@ bool APuzzleLever::TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReas
 		return false;
 	}
 
-	if (!IsPawnAdjacent(Pawn))
-	{
-		if (OutReason)
-		{
-			*OutReason = NSLOCTEXT("LTTSPuzzle", "LeverOutOfReach", "Stand next to the lever to work it.");
-		}
-		return false;
-	}
+	// 레버 옆에 서 있어야 한다는 제약을 걷어냈다. 이제 휠은 화면 어디서 잡아도 돌아가므로,
+	// 폰의 위치는 회전 가능 여부와 무관하다. 되살릴 때를 대비해 검사 자체는 남겨 둔다.
+	// if (!IsPawnAdjacent(Pawn))
+	// {
+	// 	if (OutReason)
+	// 	{
+	// 		*OutReason = NSLOCTEXT("LTTSPuzzle", "LeverOutOfReach", "Stand next to the lever to work it.");
+	// 	}
+	// 	return false;
+	// }
 
 	// 방향이 고정된 레버는 반대쪽 요청을 장애물까지 내려보내지 않는다. 이것은 장애물이 돌 수
 	// 있느냐의 문제가 아니라 이 휠이 그쪽으로는 안 돌아간다는 사실이므로, 사유도 휠을 가리킨다.
@@ -189,7 +192,18 @@ bool APuzzleLever::TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReas
 		return false;
 	}
 
-	return Target->TryRotate(TurnSign, OutReason);
+	if (Target->TryRotate(TurnSign, OutReason))
+	{
+		return true;
+	}
+
+	// 여기까지 왔으면 휠은 돌았는데 장애물이 걸린 것이다. 위의 레버 자체 거부(손이 안 닿음, 한쪽만 도는
+	// 휠)에는 소리를 내지 않는다 -- 걸린 것은 장애물이다.
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(Target->RotateJamSoundKey, Target->GetRootComponent());
+	}
+	return false;
 }
 
 // ---------------------------------------------------------------------------- 생명주기
@@ -251,11 +265,13 @@ void APuzzleLever::BeginPlay()
 		}
 	}
 
-	if (Reachable == 0)
-	{
-		UE_LOG(LogLTTSGrid, Warning,
-			TEXT("%s: no free floor beside it, so the lever cannot be worked."), *GetName());
-	}
+	// 멀리서도 돌릴 수 있게 된 뒤로 옆에 설 자리가 없다는 것은 더 이상 버그가 아니므로
+	// 경고하지 않는다. 조작 셀 수는 아래 로그에 그대로 남겨 둔다.
+	// if (Reachable == 0)
+	// {
+	// 	UE_LOG(LogLTTSGrid, Warning,
+	// 		TEXT("%s: no free floor beside it, so the lever cannot be worked."), *GetName());
+	// }
 
 	const TCHAR* DirectionText = (Direction == EPuzzleRotationDirection::Free)
 		? TEXT("either way")

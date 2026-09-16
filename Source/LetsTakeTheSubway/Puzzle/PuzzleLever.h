@@ -19,9 +19,10 @@ class UStaticMeshComponent;
  * 커서를 얼마나 크게 휘두르든 드래그 한 번은 90도 회전 한 번이므로, 풀이는 플레이어가
  * 얼마나 세게 돌리느냐가 아니라 셀 수 있는 이동 횟수로 정해진다.
  *
- * 폰은 레버 옆에 서 있어야 한다. 그렇지 않으면 플랫폼 어디서든 구조물을 돌릴 수 있게 되고,
- * 장애물이 길을 막은 뒤 레버까지 걸어가는 과정 -- 이 퍼즐을 퍼즐답게 만드는 요소의
- * 대부분 -- 이 무의미해진다.
+ * 폰이 레버 옆에 서 있어야 한다는 제약은 걷어냈다. 이제 화면에 보이기만 하면 어디서든
+ * 휠을 잡아 돌릴 수 있다 -- 레버까지 걸어가는 이동이 퍼즐의 일부였지만, 조작할 때마다
+ * 왕복하는 쪽이 더 번거로웠다. 되살릴 여지를 남겨 두려고 IsPawnAdjacent와 조작 셀
+ * 계산은 지우지 않고 그대로 둔다.
  */
 UCLASS(HideCategories = (Physics, Collision, Networking, Input, LOD, Cooking, HLOD, DataLayers, Replication))
 class LETSTAKETHESUBWAY_API APuzzleLever : public AActor
@@ -69,9 +70,10 @@ public:
 	/** 휠의 월드 위치. 드래그는 이 점을 중심으로 잰다. */
 	FVector GetWheelWorldLocation() const;
 
-	/** 레버를 조작할 수 있는 네 개의 셀(조작 셀). */
+	/** 레버에 인접한 네 개의 셀. 인접 제약을 걷어낸 뒤로는 조작 가능 여부와 무관하다. */
 	void GetOperatingCells(TArray<FIntPoint>& OutCells) const;
 
+	/** 현재 조작 판정에는 쓰이지 않는다. 인접 제약을 되살릴 때를 위해 남겨 둔 검사다. */
 	bool IsPawnAdjacent(const AGridPawn* Pawn) const;
 
 	/** 이 레버가 주어진 방향의 회전을 받는지. 드래그 프리뷰도 이걸 보고 휠을 돌릴지 정한다. */
@@ -82,7 +84,12 @@ public:
 
 	// ---------------------------------------------------------------- 사용
 
-	/** 대상을 90도 돌리거나 왜 안 되는지 알려준다. TurnSign +1이 시계 방향이다. */
+	/**
+	 * 대상을 90도 돌리거나 왜 안 되는지 알려준다. TurnSign +1이 시계 방향이다.
+	 *
+	 * Pawn은 인접 제약을 걷어낸 뒤로 쓰이지 않지만, 제약을 되살릴 때 호출부를 다시 고치지
+	 * 않도록 인자는 그대로 둔다.
+	 */
 	bool TryTurn(int32 TurnSign, const AGridPawn* Pawn, FText* OutReason = nullptr);
 
 	/** 드래그하는 동안 휠 메시를 돌린다. 순전히 비주얼용이며 0을 주면 원위치한다. */

@@ -13,8 +13,11 @@
 #include "Puzzle/PuzzleLever.h"
 #include "Puzzle/PuzzleRotatingObstacle.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
 #include "Stage/StageInfo.h"
 #include "Stage/StageSubsystem.h"
+#include "UI/Guide/GuideDataSubsystem.h"
+#include "UI/UIManagerSubsystem.h"
 #include "Vehicle/GridTrain.h"
 
 #include "Camera/CameraActor.h"
@@ -81,6 +84,14 @@ void AGridPlayerController::BeginPlay()
 
 	FeedbackText = TEXT("WASD to move. Drag a block to push it.");
 
+	// UI가 열리면 게임 입력을 막는다(2026-09-16). UI 매니저는 레벨을 넘어 살아 있으므로 EndPlay에서 반드시 푼다.
+	if (UUIManagerSubsystem* UI = UUIManagerSubsystem::Get(this))
+	{
+		UI->OnUIOpened.AddUniqueDynamic(this, &AGridPlayerController::HandleUIOpened);
+		UI->OnUIClosed.AddUniqueDynamic(this, &AGridPlayerController::HandleUIClosed);
+		bUIBlocksInput = UI->IsUIOpen();
+	}
+
 	// 구역 카메라. 구역 변경 이벤트가 아니라 상태 이벤트를 받는 이유: 레벨 시작 판정은 구역 0이어도
 	// 반드시 한 번 오므로, 구역 카메라가 없는 맵도 여기서 한 번 확인하고 경고할 수 있다.
 	// 레벨 시작 판정은 모든 액터 BeginPlay가 끝난 뒤(UWorld::OnWorldBeginPlay)라 첫 방송을 놓치지 않는다.
@@ -104,7 +115,44 @@ void AGridPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	BoundStage.Reset();
 
+	if (UUIManagerSubsystem* UI = UUIManagerSubsystem::Get(this))
+	{
+		UI->OnUIOpened.RemoveDynamic(this, &AGridPlayerController::HandleUIOpened);
+		UI->OnUIClosed.RemoveDynamic(this, &AGridPlayerController::HandleUIClosed);
+	}
+
 	Super::EndPlay(EndPlayReason);
+}
+
+void AGridPlayerController::HandleUIOpened()
+{
+	bUIBlocksInput = true;
+
+	// UI가 열리는 순간 쥐고 있던 것을 놓는다. 뗌 이벤트는 UI 전용 모드에서 오지 않으므로 기다리면 영영 쥔 채로 남는다.
+	bPressPending = false;
+	FinishLeverDrag();
+	FinishDrag();
+
+	HeldMoveKeys.Reset();
+	if (AGridPawn* GridPawn = GetGridPawn())
+	{
+		GridPawn->SetHeldDirection(TOptional<EGridDirection>());
+	}
+
+	if (bHadHover)
+	{
+		FGridRuntimeDebugDrawer::ClearHover(GetWorld());
+		bHadHover = false;
+		LastHoveredCell = FIntPoint(MIN_int32, MIN_int32);
+		LastHoverKind = FCursorPick::EKind::None;
+		LastHoveredBlock.Reset();
+	}
+}
+
+void AGridPlayerController::HandleUIClosed()
+{
+	const UUIManagerSubsystem* UI = UUIManagerSubsystem::Get(this);
+	bUIBlocksInput = UI && UI->IsUIOpen();
 }
 
 // ---------------------------------------------------------------------------- 구역 카메라
@@ -520,6 +568,16 @@ bool AGridPlayerController::TraceFloorIgnoringBlocks(
 
 void AGridPlayerController::OnPressed()
 {
+	if (bUIBlocksInput)
+	{
+		return;
+	}
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySound2D(ClickSoundKey);
+	}
+
 	AGridActor* Grid = GetGrid();
 	AGridPawn* GridPawn = GetGridPawn();
 
@@ -553,13 +611,13 @@ void AGridPlayerController::OnPressed()
 			return;
 		}
 
-		// 드래그가 끝날 때가 아니라 누르는 순간에 거부해서, 플레이어가 제스처를 낭비하기
-		// 전에 걸어오라고 알려 준다.
-		if (!Lever->IsPawnAdjacent(GridPawn))
-		{
-			ShowFeedback(TEXT("Stand next to the lever to work it."), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
+		// 레버 옆에 서 있어야 한다는 제약은 걷어냈다. 이제 휠이 보이기만 하면 폰이 어디에
+		// 있든 잡아 돌릴 수 있다. 제약을 되살릴 때를 위해 거부 경로는 남겨 둔다.
+		// if (!Lever->IsPawnAdjacent(GridPawn))
+		// {
+		// 	ShowFeedback(TEXT("Stand next to the lever to work it."), FLinearColor(1.0f, 0.65f, 0.05f));
+		// 	return;
+		// }
 
 		FVector2D ScreenCentre;
 		if (!ProjectWorldLocationToScreen(Lever->GetWheelWorldLocation(), ScreenCentre))
@@ -589,18 +647,7 @@ void AGridPlayerController::OnPressed()
 
 	if (Pick.Kind == FCursorPick::EKind::Vehicle)
 	{
-		AGridTrain* Train = Pick.Vehicle.Get();
-		if (!Train)
-		{
-			return;
-		}
-
-		// 정차역을 가리지 않고 문 앞 셀을 모은다. 클릭한 순간 열차가 터널 한가운데 있을 수도
-		// 있으므로, 폰은 "지금 서 있는 역"이 아니라 승강장 전체에서 가장 가까운 문으로 간다.
-		TArray<FIntPoint> DoorCells;
-		Train->GetApproachCells(DoorCells);
-
-		BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, DoorCells);
+		RequestTrainBoarding(Pick.Vehicle.Get());
 		return;
 	}
 
@@ -693,9 +740,45 @@ void AGridPlayerController::MovePawnToCell(const FIntPoint& Cell)
 	}
 
 	GridPawn->RequestMoveToCell(Cell);
+
+	// 바닥 클릭도 이동 입력이다. 열차에서 내린 뒤 걸어 둔 가이드가 있으면 여기서 뜬다(2026-09-16).
+	if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+	{
+		Guide->NotifyMoveInput();
+	}
 }
 
 // ---------------------------------------------------------------------------- 예약 탑승
+
+bool AGridPlayerController::RequestTrainBoarding(AGridTrain* Train)
+{
+	if (!Train)
+	{
+		return false;
+	}
+
+	// 정차역을 가리지 않고 문 앞 셀을 모은다. 클릭한 순간 열차가 터널 한가운데 있을 수도
+	// 있으므로, 폰은 "지금 서 있는 역"이 아니라 승강장 전체에서 가장 가까운 문으로 간다.
+	//
+	// 먼저 문 한가운데와 일직선에 가까운 칸으로 보낸다. 거기서 기다리면 탈 때 옆걸음이 거의
+	// 없다. 그런 칸에 갈 길이 없을 때만(누가 서 있거나 막힘) 문 앞 칸 아무 데로나 간다.
+	TArray<FIntPoint> FrontCells;
+	Train->GetDoorFrontCells(FrontCells);
+
+	AGridActor* Grid = GetGrid();
+	AGridPawn* GridPawn = GetGridPawn();
+	FIntPoint Reachable;
+	if (!FrontCells.IsEmpty() && Grid && GridPawn
+		&& Grid->FindNearestReachableCell(GridPawn->GetCurrentCell(), FrontCells, GridPawn, Reachable))
+	{
+		return BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, FrontCells);
+	}
+
+	TArray<FIntPoint> DoorCells;
+	Train->GetApproachCells(DoorCells);
+
+	return BeginPendingBoarding(FPendingBoarding::EKind::Train, Train, DoorCells);
+}
 
 bool AGridPlayerController::RequestElevatorBoarding(APuzzleElevatorBlock* Elevator)
 {
@@ -918,6 +1001,11 @@ bool AGridPlayerController::TryCompleteBoarding()
 
 void AGridPlayerController::OnReleased()
 {
+	if (bUIBlocksInput)
+	{
+		return;
+	}
+
 	FinishLeverDrag();
 	FinishDrag();
 
@@ -1027,6 +1115,11 @@ void AGridPlayerController::HandleBlockClick(const FCursorPick& Pick)
 
 void AGridPlayerController::OnMoveKeyPressed(EScreenMoveDir Dir)
 {
+	if (bUIBlocksInput)
+	{
+		return;
+	}
+
 	// 마지막에 누른 키가 이긴다. 이미 목록에 있더라도(키 반복 등) 맨 뒤로 옮긴다.
 	HeldMoveKeys.Remove(Dir);
 	HeldMoveKeys.Add(Dir);
@@ -1035,6 +1128,12 @@ void AGridPlayerController::OnMoveKeyPressed(EScreenMoveDir Dir)
 	// 걸어가서 타기로 한 예약은 여기서 버린다. 남겨 두면 다른 데로 걸어간 뒤에도 예약이
 	// 살아남아 엉뚱한 순간에 태운다.
 	CancelPendingBoarding();
+
+	// 열차에서 내린 뒤 걸어 둔 가이드가 있으면 첫 이동키에서 뜬다(2026-09-16).
+	if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+	{
+		Guide->NotifyMoveInput();
+	}
 
 	// 조각이 정리되는 동안에는 걷지 않는다. 키는 눌린 채로 두므로 정리되는 즉시 이어 걷는다.
 	if (const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this))
@@ -1265,6 +1364,14 @@ void AGridPlayerController::UpdateDrag()
 		return;
 	}
 
+	// 바닥 타일에 딱 들어맞아 블록이 스스로 멈췄다(bParkOnFloorTile). 위와 같은 규칙으로
+	// 놓았다 다시 잡을 때까지 기다린다 -- 그래야 아래의 StartSlide가 곧바로 다시 밀지 않는다.
+	if (Block->IsParkedOnTile())
+	{
+		Block->SetHeldSlideDirection(TOptional<EGridDirection>());
+		return;
+	}
+
 	if (DragAxis == EPuzzleMoveAxis::None)
 	{
 		return;		// 움직일 수 없는 블록: 뗄 때 왜 안 움직이는지 알려 주려고 쥐고만 있는다
@@ -1361,6 +1468,11 @@ void AGridPlayerController::UpdateDrag()
 		LastRefusedDir = Refused;
 		bHasRefusedDir = true;
 		ShowFeedback(Reason.ToString(), FLinearColor(1.0f, 0.65f, 0.05f));
+
+		if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+		{
+			Sound->PlaySoundAttached(Block->JamSoundKey, Block->GetRootComponent());
+		}
 	}
 }
 
@@ -1472,6 +1584,16 @@ void AGridPlayerController::PlayerTick(float DeltaTime)
 	}
 #endif
 
+	// UI가 열려 있으면 조작은 멈추고, 이미 걸어가고 있는 탑승 예약만 마저 진행한다(2026-09-16).
+	if (bUIBlocksInput)
+	{
+		if (HasPendingBoarding())
+		{
+			UpdatePendingBoarding();
+		}
+		return;
+	}
+
 	// 잡기보다 먼저 본다. 문턱을 넘는 프레임에 바로 드래그가 시작되도록.
 	if (bPressPending)
 	{
@@ -1538,14 +1660,14 @@ void AGridPlayerController::UpdateHover()
 
 	if (Pick.Kind == FCursorPick::EKind::Lever)
 	{
-		if (const APuzzleLever* Lever = Pick.Lever.Get())
-		{
-			// 레버 자신의 셀이 아니라 레버를 조작할 수 있는 셀들: 손을 뻗기 전에 플레이어가
-			// 알아야 할 단 하나는 어디에 서야 하느냐다.
-			TArray<FIntPoint> Cells;
-			Lever->GetOperatingCells(Cells);
-			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
-		}
+		// 인접 제약이 사라진 뒤로는 어디에 서야 하는지 알려 줄 필요가 없으므로, 조작 셀
+		// 하이라이트를 그리지 않는다. 제약을 되살린다면 이 그리기도 함께 되살린다.
+		// if (const APuzzleLever* Lever = Pick.Lever.Get())
+		// {
+		// 	TArray<FIntPoint> Cells;
+		// 	Lever->GetOperatingCells(Cells);
+		// 	FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
+		// }
 	}
 	else if (Pick.Kind == FCursorPick::EKind::Vehicle)
 	{
@@ -1617,3 +1739,65 @@ static FAutoConsoleCommandWithWorldAndArgs GZoneCameraCommand(
 	TEXT("Blend the view to a zone camera without walking there: ltts.ZoneCamera <ZoneIndex> [BlendSeconds]. ")
 	TEXT("BlendSeconds defaults to AStageInfo::CameraBlendTime; 0 switches instantly."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&ZoneCameraCommand));
+
+// UI 확인용 명령(2026-09-16). 구역을 걷거나 트리거를 밟지 않고 PathUI 그림과 가이드 팝업을 띄운다.
+
+static void PathUICommand(const TArray<FString>& Args, UWorld* World)
+{
+	UUIManagerSubsystem* UI = UUIManagerSubsystem::Get(World);
+	if (!UI || Args.Num() < 1)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.PathUI: usage ltts.PathUI <Index 0-9> (needs a running game world)."));
+		return;
+	}
+
+	UI->ShowOrRefreshPathUI(FCString::Atoi(*Args[0]));
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GPathUICommand(
+	TEXT("ltts.PathUI"),
+	TEXT("Show the PathUI with an image index: ltts.PathUI <Index>. Stage1 zones 1-4 = 0-3, Stage1 clear ride = 4, Stage2 zones 1/3/4/6/8 = 5-9."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PathUICommand));
+
+static void GuideCommand(const TArray<FString>& Args, UWorld* World)
+{
+	UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(World);
+	const UEnum* Enum = StaticEnum<EGuideType>();
+	if (!Guide || !Enum || Args.Num() < 1)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.Guide: usage ltts.Guide <Tutorial1|Tutorial2|Stage1_1|Stage1_2|Stage1_3|Stage2_1> (needs a running game world)."));
+		return;
+	}
+
+	int64 Value = Enum->GetValueByNameString(Args[0]);
+	if (Value == INDEX_NONE)
+	{
+		Value = Enum->GetValueByNameString(FString::Printf(TEXT("EGuideType::%s"), *Args[0]));
+	}
+	if (Value == INDEX_NONE)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.Guide: unknown guide '%s'."), *Args[0]);
+		return;
+	}
+
+	Guide->RequestGuide(static_cast<EGuideType>(Value), /*bForce*/ true);
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GGuideCommand(
+	TEXT("ltts.Guide"),
+	TEXT("Show a guide popup even if it was already shown: ltts.Guide <Tutorial1|Tutorial2|Stage1_1|Stage1_2|Stage1_3|Stage2_1>."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&GuideCommand));
+
+static void GuideResetCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(World))
+	{
+		Guide->ResetShownGuides();
+		UE_LOG(LogLTTSGrid, Display, TEXT("ltts.GuideReset: shown guides cleared."));
+	}
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GGuideResetCommand(
+	TEXT("ltts.GuideReset"),
+	TEXT("Forget which guide popups were shown so their triggers fire again."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&GuideResetCommand));

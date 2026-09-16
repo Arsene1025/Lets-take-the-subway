@@ -14,6 +14,9 @@ class AGridCellMarkerBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGridStageClear, APawn*, Pawn, FIntPoint, Cell);
 
+/** 폰(플레이어든 행인이든)이 셀 하나에 완전히 들어섰다. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGridPawnEnteredCell, APawn*, Pawn, FIntPoint, Cell);
+
 /**
  * 걸을 수 있는 그리드를 소유한다. 레벨을 트레이스해 그리드를 생성하고, 그 위에 디자이너의
  * 마커 오버라이드를 합친 뒤, 런타임에 이동 질의에 답한다.
@@ -153,6 +156,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Grid")
 	FOnGridStageClear OnStageClear;
 
+	/**
+	 * 폰이 셀에 들어섰다. 플레이어 폰(AGridPawn)과 행인(AGridNPC) 모두 보낸다.
+	 *
+	 * 받는 쪽이 누구인지 가려야 한다. 개찰구 소리(ASoundCellTrigger)처럼 셀 단위로 반응하는 저작
+	 * 액터를 위한 것이다. 폰에게는 콜리전이 없어 볼륨 오버랩으로는 알 수 없다.
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "Grid")
+	FOnGridPawnEnteredCell OnPawnEnteredCell;
+
 	// ---------------------------------------------------------------- 에디터 동작
 
 	/** 레벨을 트레이스하고, 마커 오버라이드를 구워 적용한다. */
@@ -282,7 +294,11 @@ public:
 	bool FindNearestReachableCell(FIntPoint From, const TArray<FIntPoint>& Candidates,
 		const APawn* Pawn, FIntPoint& OutCell, int32* OutSteps = nullptr) const;
 
-	/** 폰이 도착하면 호출한다. StageClear 셀이면 OnStageClear를 발생시킨다. */
+	/**
+	 * 폰이 도착하면 호출한다. OnPawnEnteredCell을 방송하고, StageClear 셀이면 OnStageClear도 발생시킨다.
+	 *
+	 * 행인도 부른다(2026-09-15, 개찰구 소리). StageClear를 받는 쪽은 AGridPawn인지 확인한다.
+	 */
 	void NotifyPawnEnteredCell(APawn* Pawn, FIntPoint Cell);
 
 	/** 월드의 첫 번째 그리드 액터, 없으면 null. */

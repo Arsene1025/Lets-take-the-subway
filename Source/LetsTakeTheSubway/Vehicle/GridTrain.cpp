@@ -9,11 +9,18 @@
 #include "Grid/GridTypes.h"
 #include "NPC/GridNPCSpawner.h"
 #include "Player/GridPawn.h"
+#include "Player/GridPlayerController.h"
 #include "Vehicle/VehicleSeat.h"
 #include "Puzzle/PuzzleSubsystem.h"
+#include "Sound/GameSoundSubsystem.h"
+#include "UI/Guide/GuideDataSubsystem.h"
 
+#include "Animation/AnimSequenceBase.h"
+#include "Components/AudioComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -34,6 +41,22 @@ AGridTrain::AGridTrain()
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
+
+	// 아트 차체. 스켈레탈 메시는 블루프린트가 정하고, 여기서는 문과 바퀴를 움직일 준비만 한다.
+	// 판정에는 끼지 않는다: 커서는 BodyMesh 프록시가, 폰의 위치는 그리드가 정한다.
+	ArtMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("ArtMesh"));
+	ArtMesh->SetupAttachment(SceneRoot);
+	ArtMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArtMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	ArtMesh->SetGenerateOverlapEvents(false);
+	ArtMesh->SetCanEverAffectNavigation(false);
+	ArtMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode, false);
+
+	// 화면 밖에서도 포즈를 갱신한다. 카메라가 열차를 벗어난 사이 문이 열리고 닫혀도, 다시
+	// 보았을 때 문이 이전 자세로 멈춰 있지 않게 한다. 짚는 애니메이션이라 갱신 빈도를 낮추는
+	// 최적화도 끈다 -- 프레임을 건너뛰면 단계와 보이는 문이 어긋난다.
+	ArtMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	ArtMesh->bEnableUpdateRateOptimizations = false;
 
 #if WITH_EDITORONLY_DATA
 	// 뷰포트에서 끌리지 않게 잠근다(Lock Actor Movement). 아트가 역 구조물을 박스 선택으로
@@ -230,6 +253,58 @@ void AGridTrain::GetApproachCells(TArray<FIntPoint>& OutCells) const
 	}
 }
 
+void AGridTrain::GetDoorFrontCells(TArray<FIntPoint>& OutCells) const
+{
+	OutCells.Reset();
+
+	if (!Grid)
+	{
+		return;
+	}
+
+	TArray<float> Offsets;
+	GetDoorOffsets(Offsets);
+
+	const FVector Axis = GetActorForwardVector();
+	const double Reach = DoorWidth * 0.5 + Grid->CellSize * 0.5;
+
+	TArray<FIntPoint> Cells;
+	for (int32 StopIndex = 0; StopIndex < Stops.Num(); ++StopIndex)
+	{
+		GetBoardingCells(StopIndex, Cells);
+
+		// 셀이 문 한가운데에서 진행축으로 얼마나 떨어졌는지는 그 역에 선 열차 기준으로 잰다.
+		const FVector StopLocation = GetStopLocation(StopIndex);
+
+		for (const float Offset : Offsets)
+		{
+			FIntPoint Best(-1, -1);
+			double BestDistance = TNumericLimits<double>::Max();
+
+			for (const FIntPoint& Cell : Cells)
+			{
+				if (!Grid->IsValidCell(Cell))
+				{
+					continue;
+				}
+
+				const double Distance = FMath::Abs(
+					LTTSVehicle::AlongAxis(Grid->CellToWorld(Cell), StopLocation, Axis) - Offset);
+				if (Distance < BestDistance)
+				{
+					BestDistance = Distance;
+					Best = Cell;
+				}
+			}
+
+			if (Grid->IsValidCell(Best) && BestDistance <= Reach)
+			{
+				OutCells.AddUnique(Best);
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------- 가감속
 
 float AGridTrain::GetSpeedFactor(float Alpha) const
@@ -258,6 +333,12 @@ float AGridTrain::GetSpeedFactor(float Alpha) const
 	return FMath::Clamp(Factor, MinSpeedFactor, 1.0f);
 }
 
+double AGridTrain::GetSeatHalfExtent() const
+{
+	// 차체 끝에서 1 m 안쪽까지만. 좌석이 차체 밖으로 나가면 폰이 허공에 실린다.
+	return FMath::Max(BodyLength * 0.5 - 100.0, 0.0);
+}
+
 // ---------------------------------------------------------------------------- 아트
 
 void AGridTrain::ApplyArtFallbackMaterial()
@@ -269,12 +350,15 @@ void AGridTrain::ApplyArtFallbackMaterial()
 
 	// 블루프린트가 붙인 메시만 손본다. 코드가 만든 프록시(차체와 문 슬랩)는 자기
 	// 그레이박스 머티리얼을 갖고 있고, 문 슬랩은 열림·닫힘에 따라 색을 바꾼다.
-	TArray<UStaticMeshComponent*> Meshes;
+	//
+	// 스태틱과 스켈레탈을 가리지 않는다. 아트 스켈레탈 차체(ArtMesh)도 임포트 직후라 슬롯이
+	// 엔진 기본 머티리얼이다.
+	TArray<UMeshComponent*> Meshes;
 	GetComponents(Meshes);
 
-	for (UStaticMeshComponent* Mesh : Meshes)
+	for (UMeshComponent* Mesh : Meshes)
 	{
-		if (!Mesh || Mesh == BodyMesh || DoorMeshes.Contains(Mesh))
+		if (!Mesh || Mesh == BodyMesh || DoorMeshes.Contains(Cast<UStaticMeshComponent>(Mesh)))
 		{
 			continue;
 		}
@@ -348,17 +432,183 @@ void AGridTrain::RefreshDoorLook()
 
 // ---------------------------------------------------------------------------- 연출 훅
 
-void AGridTrain::AnimateDoorsOpening_Implementation(float /*Alpha*/)
+void AGridTrain::AnimateDoorsOpening_Implementation(float Alpha)
 {
-	// 아직 비어 있다. 문 애니메이션이 준비되면 여기서 재생한다.
-	//
-	// 이 훅이 비어 있어도 규칙은 지켜진다: 문이 열리는 동안 타고 내리지 못하게 막는 것은
-	// DoorsOpening 단계이지 이 함수가 아니다.
+	// 보이는 문을 단계 진행도에 맞출 뿐이다. 문이 열리는 동안 타고 내리지 못하게 막는 것은
+	// 여전히 DoorsOpening 단계이지 이 함수가 아니다.
+	ScrubDoorAnimation(DoorOpenAnimation, Alpha, false);
 }
 
-void AGridTrain::AnimateDoorsClosing_Implementation(float /*Alpha*/)
+void AGridTrain::AnimateDoorsClosing_Implementation(float Alpha)
 {
-	// 아직 비어 있다. 열리는 쪽과 같다.
+	// 닫힘 애니메이션이 없으면 열림을 거꾸로 짚는다. Alpha 0(열림)이 열림 애니메이션의 끝이다.
+	//
+	// 애니메이션을 먼저 받아 두어야 한다. 한 호출식의 인자로 함께 넘기면 bReverse를 읽는 쪽이
+	// GetDoorClosingAnimation보다 먼저 평가될 수 있어(MSVC) 역재생이 정방향으로 돈다.
+	bool bReverse = false;
+	UAnimSequenceBase* Closing = GetDoorClosingAnimation(bReverse);
+	ScrubDoorAnimation(Closing, Alpha, bReverse);
+}
+
+bool AGridTrain::HasArtMesh() const
+{
+	return ArtMesh && ArtMesh->GetSkeletalMeshAsset();
+}
+
+UAnimSequenceBase* AGridTrain::GetDoorClosingAnimation(bool& bOutReverse) const
+{
+	bOutReverse = false;
+
+	if (DoorCloseAnimation)
+	{
+		return DoorCloseAnimation;
+	}
+
+	if (DoorOpenAnimation)
+	{
+		bOutReverse = true;
+		return DoorOpenAnimation;
+	}
+
+	return nullptr;
+}
+
+float AGridTrain::GetAnimationDuration(const UAnimSequenceBase* Animation)
+{
+	if (!Animation)
+	{
+		return 0.0f;
+	}
+
+	// GetPlayLength는 RateScale을 모른다. 애셋에서 속도를 바꿔 두었으면 실제 걸리는 시간이 다르다.
+	return Animation->GetPlayLength() / FMath::Max(FMath::Abs(Animation->RateScale), KINDA_SMALL_NUMBER);
+}
+
+void AGridTrain::ScrubDoorAnimation(UAnimSequenceBase* Animation, float Alpha, bool bReverse)
+{
+	if (!Animation || !HasArtMesh() || !ArtMesh->GetSingleNodeInstance())
+	{
+		return;
+	}
+
+	// SetAnimation은 재생 위치를 0으로 되돌린다. 애니메이션이 바뀔 때만 부른다.
+	if (CurrentArtAnimation != Animation)
+	{
+		ArtMesh->SetAnimation(Animation);
+		CurrentArtAnimation = Animation;
+	}
+	else if (ArtMesh->IsPlaying())
+	{
+		ArtMesh->Stop();
+	}
+
+	// 재생하지 않고 위치만 짚는다. 멈춰 있어도 컴포넌트 틱이 짚은 위치의 포즈를 평가한다.
+	const float Clamped = FMath::Clamp(Alpha, 0.0f, 1.0f);
+	const float Position = (bReverse ? 1.0f - Clamped : Clamped) * Animation->GetPlayLength();
+	ArtMesh->SetPosition(Position, false);
+}
+
+void AGridTrain::StartWheelAnimation()
+{
+	if (!WheelAnimation || !HasArtMesh() || !ArtMesh->GetSingleNodeInstance())
+	{
+		return;
+	}
+
+	// 문과 바퀴는 같은 스켈레톤의 단일 애니메이션 슬롯을 나눠 쓴다. 문은 서 있을 때만, 바퀴는
+	// 달릴 때만 움직이므로 겹치지 않는다. 다음 역에 서면 문 애니메이션이 슬롯을 다시 가져간다.
+	if (CurrentArtAnimation != WheelAnimation)
+	{
+		ArtMesh->SetAnimation(WheelAnimation);
+		CurrentArtAnimation = WheelAnimation;
+	}
+
+	ArtMesh->SetPlayRate(1.0f);
+	ArtMesh->Play(true);
+}
+
+void AGridTrain::UpdateWheelPlayRate(double CurrentSpeed)
+{
+	if (WheelAnimSpeedAtRate1 <= 0.0f || !WheelAnimation || !HasArtMesh() || CurrentArtAnimation != WheelAnimation)
+	{
+		return;
+	}
+
+	ArtMesh->SetPlayRate(static_cast<float>(CurrentSpeed / WheelAnimSpeedAtRate1));
+}
+
+void AGridTrain::LogDoorBoneOffsets()
+{
+	if (!HasArtMesh())
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: ArtMesh has no skeletal mesh; nothing to measure."), *GetName());
+		return;
+	}
+
+	// 본 이름에서 L/R(한 문의 두 짝)과 front/back(차체의 두 면)을 떼면 문 하나가 남는다.
+	// 예: Subway1Door_L1_front, Subway1Door_R1_back -> Subway1Door_1.
+	const FReferenceSkeleton& RefSkeleton = ArtMesh->GetSkeletalMeshAsset()->GetRefSkeleton();
+	const FVector ActorLocation = GetActorLocation();
+	const FQuat ActorRotation = GetActorQuat();
+
+	TMap<FString, TArray<double>> Doors;
+	for (int32 BoneIndex = 0; BoneIndex < RefSkeleton.GetNum(); ++BoneIndex)
+	{
+		const FName BoneName = RefSkeleton.GetBoneName(BoneIndex);
+		FString Key = BoneName.ToString();
+		if (!Key.Contains(TEXT("Door"), ESearchCase::CaseSensitive))
+		{
+			continue;
+		}
+
+		Key.ReplaceInline(TEXT("_front"), TEXT(""), ESearchCase::CaseSensitive);
+		Key.ReplaceInline(TEXT("_back"), TEXT(""), ESearchCase::CaseSensitive);
+		Key.ReplaceInline(TEXT("_L"), TEXT("_"), ESearchCase::CaseSensitive);
+		Key.ReplaceInline(TEXT("_R"), TEXT("_"), ESearchCase::CaseSensitive);
+
+		// 탑승 셀 계산과 같은 방식으로 잰다: 액터 회전만 되돌리고 스케일은 보지 않는다.
+		const FVector World = ArtMesh->GetBoneLocation(BoneName, EBoneSpaces::WorldSpace);
+		const FVector Local = ActorRotation.UnrotateVector(World - ActorLocation);
+		Doors.FindOrAdd(Key).Add(Local.X);
+	}
+
+	if (Doors.IsEmpty())
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: no bone names containing 'Door' in %s."),
+			*GetName(), *GetNameSafe(ArtMesh->GetSkeletalMeshAsset()));
+		return;
+	}
+
+	TArray<float> Offsets;
+	GetDoorOffsets(Offsets);
+
+	Doors.KeySort([](const FString& A, const FString& B) { return A < B; });
+	for (const TPair<FString, TArray<double>>& Door : Doors)
+	{
+		double Sum = 0.0;
+		for (const double X : Door.Value)
+		{
+			Sum += X;
+		}
+		const double DoorCentre = Sum / Door.Value.Num();
+
+		float Nearest = 0.0f;
+		double BestDistance = TNumericLimits<double>::Max();
+		for (const float Offset : Offsets)
+		{
+			if (FMath::Abs(DoorCentre - Offset) < BestDistance)
+			{
+				BestDistance = FMath::Abs(DoorCentre - Offset);
+				Nearest = Offset;
+			}
+		}
+
+		const bool bOff = BestDistance > 50.0;
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("%s: door '%s' (%d bones) centre X %.1f cm, nearest DoorOffsetsLocal %.1f, diff %.1f cm%s"),
+			*GetName(), *Door.Key, Door.Value.Num(), DoorCentre, Nearest, BestDistance,
+			bOff ? TEXT(" -- CHECK: boarding cells may not face this door.") : TEXT("."));
+	}
 }
 
 void AGridTrain::OnConstruction(const FTransform& Transform)
@@ -384,6 +634,46 @@ void AGridTrain::BeginPlay()
 	// 높이는 배치된 그대로 쓴다. 선로 셀은 걸을 수 없어 그리드에 바닥 높이가 없으므로
 	// 셀에서 Z를 얻을 수 없다.
 	TrackZ = GetActorLocation().Z;
+
+	// 아트 문. 단계 시간을 애니메이션 길이에 맞추는 일은 아래 설정 로그보다 앞서야 맞춘 값이 찍힌다.
+	if (HasArtMesh())
+	{
+		// 블루프린트가 애니메이션 모드를 바꿔 두었거나 인스턴스가 아직 없으면 단일 노드로 되돌린다.
+		if (!ArtMesh->GetSingleNodeInstance())
+		{
+			ArtMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			ArtMesh->InitializeAnimScriptInstance(true);
+		}
+
+		// 열차 틱에서 짚은 위치를 같은 프레임에 포즈로 반영한다.
+		ArtMesh->AddTickPrerequisiteActor(this);
+
+		if (bMatchDoorTimingToAnimation)
+		{
+			if (DoorOpenAnimation)
+			{
+				DoorOpeningSeconds = GetAnimationDuration(DoorOpenAnimation);
+			}
+
+			bool bReverse = false;
+			if (const UAnimSequenceBase* Closing = GetDoorClosingAnimation(bReverse))
+			{
+				DoorCloseSeconds = GetAnimationDuration(Closing);
+			}
+		}
+
+		if (DoorOpenAnimation)
+		{
+			// 닫힌 모습으로 시작한다.
+			ScrubDoorAnimation(DoorOpenAnimation, 0.0f, false);
+		}
+		else
+		{
+			UE_LOG(LogLTTSGrid, Warning,
+				TEXT("%s: ArtMesh has a skeletal mesh but DoorOpenAnimation is not set; the doors will not move."),
+				*GetName());
+		}
+	}
 
 	if (Stops.Num() < 2)
 	{
@@ -458,8 +748,57 @@ void AGridTrain::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Subsystem->UnregisterVehicle(this);
 	}
 
+	// 안 소리는 위치 없이 월드에 떠 있어 열차와 함께 사라지지 않는다.
+	StopInsideSound(0.0f);
+
 	Rider.Reset();
 	Super::EndPlay(EndPlayReason);
+}
+
+// ---------------------------------------------------------------------------- 사운드
+
+void AGridTrain::UpdateArrivalSounds()
+{
+	if (!Stops.IsValidIndex(CurrentStop) || !Stops[CurrentStop].bArrivalSounds)
+	{
+		return;
+	}
+
+	UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this);
+	if (!Sound)
+	{
+		return;
+	}
+
+	const double Remaining = FMath::Max(MoveLength - MoveDistance, 0.0);
+	const auto Reached = [Remaining](float Distance)
+	{
+		return Distance <= 0.0f || Remaining <= Distance;
+	};
+
+	if (!bNotificationPlayed && Reached(NotificationDistance))
+	{
+		bNotificationPlayed = true;
+		Sound->PlaySound2D(SoundKeys.Notification);
+	}
+
+	if (!bApproachPlayed && Reached(ApproachSoundDistance))
+	{
+		bApproachPlayed = true;
+		ApproachAudio = Sound->PlaySoundAttached(SoundKeys.Approach, GetRootComponent());
+	}
+
+	if (!bStopSoundPlayed && Reached(StopSoundDistance))
+	{
+		bStopSoundPlayed = true;
+		Sound->PlaySoundAttached(SoundKeys.Stop, GetRootComponent());
+	}
+}
+
+void AGridTrain::StopInsideSound(float FadeOutSeconds)
+{
+	UGameSoundSubsystem::StopSound(InsideAudio.Get(), FadeOutSeconds);
+	InsideAudio.Reset();
 }
 
 // ---------------------------------------------------------------------------- 정차역
@@ -498,6 +837,9 @@ int32 AGridTrain::GetNextStopIndex() const
 
 void AGridTrain::EnterMoving()
 {
+	// 닫힘 단계를 다 거치지 않고 떠나는 경우(콘솔 TrainArrive)에도 문은 닫힌 모습이어야 한다.
+	AnimateDoorsClosing(1.0f);
+
 	const int32 Next = GetNextStopIndex();
 	if (Next == INDEX_NONE)
 	{
@@ -509,6 +851,21 @@ void AGridTrain::EnterMoving()
 
 	CurrentStop = Next;
 	Phase = ETrainPhase::Moving;
+	StartWheelAnimation();
+
+	// 새 구간의 도착 소리를 다시 준비한다. 실제로 내는 것은 Tick의 남은 거리 판정이다.
+	bNotificationPlayed = false;
+	bApproachPlayed = false;
+	bStopSoundPlayed = false;
+
+	// 플레이어를 태우고 떠난다. 카메라가 열차 안을 보지 않으므로 위치 없이 깐다.
+	if (Rider.IsValid() && !InsideAudio.IsValid())
+	{
+		if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+		{
+			InsideAudio = Sound->PlaySound2D(SoundKeys.Inside);
+		}
+	}
 
 	// 구간을 통째로 기억한다. 가감속은 "지금 몇 퍼센트를 왔는가"를 알아야 하는데,
 	// 매 프레임 현재 위치에서 목표까지의 남은 거리만 보면 그 답이 나오지 않는다.
@@ -540,6 +897,21 @@ void AGridTrain::EnterDoorsOpening()
 	PhaseTimer = DoorOpeningSeconds;
 	RefreshDoorLook();
 
+	// 진입음이 남아 있으면 문 소리에 자리를 내준다. 안 소리는 내리기 시작하므로 끝낸다.
+	UGameSoundSubsystem::StopSound(ApproachAudio.Get(), 0.3f);
+	ApproachAudio.Reset();
+	StopInsideSound(0.5f);
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(SoundKeys.DoorOpen, GetRootComponent());
+
+		if (Rider.IsValid())
+		{
+			Sound->PlaySound2D(SoundKeys.ArrivalAnnouncement);
+		}
+	}
+
 	UE_LOG(LogLTTSGrid, Verbose,
 		TEXT("%s: doors opening at stop %d '%s'."),
 		*GetName(), CurrentStop, *Stops[CurrentStop].StopName.ToString());
@@ -553,6 +925,9 @@ void AGridTrain::EnterDoorsOpen()
 	Phase = ETrainPhase::DoorsOpen;
 	PhaseTimer = DoorOpenSeconds;
 	RefreshDoorLook();
+
+	// 마지막 틱의 진행도가 1에 조금 못 미쳤을 수 있다. 문이 다 열린 모습을 확정한다.
+	AnimateDoorsOpening(1.0f);
 
 	const FGridTrainStop& Stop = Stops[CurrentStop];
 
@@ -572,43 +947,112 @@ void AGridTrain::EnterDoorsOpen()
 
 	// 타고 있던 폰을 내려 준다. 카메라가 열차 안을 들여다보지 않으므로, 문이 열리는 것을
 	// 기준으로 자동 하차시킨다(기획).
+	//
+	// 폰은 언제나 문 한가운데에서 문 앞 셀로 똑바로 나온다. 저작된 ExitCell로 곧장 걸어 나오게
+	// 하던 시절에는 승강장 가운데 셀을 적어 둔 정차역에서 폰이 차체 벽을 뚫고 비스듬히 나왔다.
 	if (AGridPawn* Pawn = Rider.Get())
 	{
 		FVector ExitWorld = GetActorLocation();
+		FIntPoint LandingCell(-1, -1);
 
-		if (Grid && Grid->IsValidCell(Stop.ExitCell))
+		if (Grid)
 		{
-			ExitWorld = Grid->CellToWorld(Stop.ExitCell);
-		}
-		else if (Grid)
-		{
-			// 저작된 하차 셀이 없으면 이 역의 문 앞 셀 가운데 폰에게 가장 가까운 칸으로
-			// 내린다. 목록의 첫 칸을 쓰면 객차 어디에 앉아 있었든 언제나 같은 문으로 나오고,
-			// 그 문이 반대쪽 끝이면 폰이 차체를 가로질러 비스듬히 걸어 나온다.
 			TArray<FIntPoint> Boarding;
 			GetBoardingCells(CurrentStop, Boarding);
 
-			double BestDistanceSq = TNumericLimits<double>::Max();
-			for (const FIntPoint& Cell : Boarding)
+			if (Boarding.Contains(Stop.ExitCell))
 			{
-				if (!Grid->IsValidCell(Cell))
+				// 저작된 하차 셀이 문 앞이면 그대로 거기로 나온다.
+				LandingCell = Stop.ExitCell;
+			}
+			else
+			{
+				// 문 앞 셀 가운데 폰에게 가장 가까운 칸으로 내린다. 폰은 탄 문 한가운데에 앉아
+				// 있으므로 대개 그 문 앞이다. 목록의 첫 칸을 쓰면 객차 어디에 앉아 있었든 언제나
+				// 같은 문으로 나오고, 그 문이 반대쪽 끝이면 폰이 차체를 가로질러 비스듬히 나온다.
+				double BestDistanceSq = TNumericLimits<double>::Max();
+				for (const FIntPoint& Cell : Boarding)
 				{
-					continue;
-				}
+					if (!Grid->IsValidCell(Cell))
+					{
+						continue;
+					}
 
-				const FVector World = Grid->CellToWorld(Cell);
-				const double DistanceSq = FVector::DistSquaredXY(World, Pawn->GetActorLocation());
-				if (DistanceSq < BestDistanceSq)
-				{
-					BestDistanceSq = DistanceSq;
-					ExitWorld = World;
+					const double DistanceSq = FVector::DistSquaredXY(Grid->CellToWorld(Cell), Pawn->GetActorLocation());
+					if (DistanceSq < BestDistanceSq)
+					{
+						BestDistanceSq = DistanceSq;
+						LandingCell = Cell;
+					}
 				}
 			}
+
+			if (Grid->IsValidCell(LandingCell))
+			{
+				ExitWorld = Grid->CellToWorld(LandingCell);
+			}
+			else if (Grid->IsValidCell(Stop.ExitCell))
+			{
+				// 문 앞 셀이 하나도 없는 역(승강장 없는 정차)이다. 저작된 셀밖에 기댈 곳이 없다.
+				ExitWorld = Grid->CellToWorld(Stop.ExitCell);
+			}
+		}
+
+		// 나올 문은 착지 셀을 마주 보는 문이다. 탄 문의 앞에 이 역의 승강장이 없거나(짧은 승강장)
+		// 저작된 ExitCell이 다른 문 앞이면, 차체 안에서 그 문 한가운데로 옮긴 뒤 내린다. 차체
+		// 안이라 옮기는 순간은 보이지 않는다.
+		if (Grid && Grid->IsValidCell(LandingCell))
+		{
+			TArray<float> Offsets;
+			GetDoorOffsets(Offsets);
+
+			const FVector Centre = GetActorLocation();
+			const FVector Axis = GetActorForwardVector();
+			const int32 Door = LTTSVehicle::NearestDoorIndex(ExitWorld, Centre, Axis, Offsets);
+
+			if (Offsets.IsValidIndex(Door))
+			{
+				const double OffDoor = FMath::Abs(LTTSVehicle::AlongAxis(ExitWorld, Centre, Axis) - Offsets[Door]);
+
+				if (OffDoor > DoorWidth * 0.5 + Grid->CellSize)
+				{
+					UE_LOG(LogLTTSGrid, Warning,
+						TEXT("%s: stop %d '%s' exit cell (%d,%d) is %.0f cm from door %d along the track; the pawn will leave at an angle."),
+						*GetName(), CurrentStop, *Stop.StopName.ToString(), LandingCell.X, LandingCell.Y, OffDoor, Door);
+				}
+				else
+				{
+					// 높이는 바꾸지 않는다. 폰은 지금 실려 있는 높이 그대로 문 한가운데로 간다.
+					const FVector ExitSeat = LTTSVehicle::SeatAtDoor(
+						Centre, Axis, Offsets[Door], GetSeatHalfExtent(), Pawn->GetActorLocation().Z);
+
+					if (FVector::DistXY(ExitSeat, Pawn->GetActorLocation()) > DoorWidth * 0.5f)
+					{
+						UE_LOG(LogLTTSGrid, Display,
+							TEXT("%s: stop %d '%s' exit cell (%d,%d) faces door %d, not the rider's door; moving inside the car to step off there."),
+							*GetName(), CurrentStop, *Stop.StopName.ToString(), LandingCell.X, LandingCell.Y, Door);
+						Pawn->SetActorLocation(ExitSeat);
+					}
+				}
+			}
+		}
+
+		// 문 앞으로 나온 뒤 걸어갈 곳. PostExitCell이 먼저이고, 없으면 문 앞이 아닌 ExitCell이다
+		// (예전 정차역은 승강장 가운데 셀을 ExitCell로 적어 두었다. 맵을 고치지 않고 그 자리로 간다).
+		UnloadedGoalCell = FIntPoint(-1, -1);
+		if (Grid && Grid->IsValidCell(Stop.PostExitCell))
+		{
+			UnloadedGoalCell = Stop.PostExitCell;
+		}
+		else if (Grid && Grid->IsValidCell(LandingCell) && Grid->IsValidCell(Stop.ExitCell) && Stop.ExitCell != LandingCell)
+		{
+			UnloadedGoalCell = Stop.ExitCell;
 		}
 
 		Pawn->WalkOntoGrid(ExitWorld);
 		Rider.Reset();
 		UnloadedPawn = Pawn;
+		UnloadedGuide = Stop.GuideOnFirstMoveAfterExit;
 	}
 }
 
@@ -617,6 +1061,11 @@ void AGridTrain::EnterDoorsClosing()
 	Phase = ETrainPhase::DoorsClosing;
 	PhaseTimer = DoorCloseSeconds;
 	RefreshDoorLook();
+
+	if (UGameSoundSubsystem* Sound = UGameSoundSubsystem::Get(this))
+	{
+		Sound->PlaySoundAttached(SoundKeys.DoorClose, GetRootComponent());
+	}
 
 	UE_LOG(LogLTTSGrid, Verbose, TEXT("%s: doors closing."), *GetName());
 
@@ -638,13 +1087,23 @@ void AGridTrain::Tick(float DeltaSeconds)
 	{
 		if (Unloaded->IsOnGrid())
 		{
-			const FIntPoint PostExit = Stops[CurrentStop].PostExitCell;
-			if (Grid->IsValidCell(PostExit))
+			if (Grid->IsValidCell(UnloadedGoalCell) && Unloaded->GetCurrentCell() != UnloadedGoalCell)
 			{
-				Unloaded->RequestMoveToCell(PostExit);
+				Unloaded->RequestMoveToCell(UnloadedGoalCell);
+			}
+
+			// 이 역의 "내린 뒤 첫 이동" 가이드를 걸어 둔다. 위의 자동 걸음은 입력이 아니므로 세지 않는다.
+			if (UnloadedGuide != EGuideType::None)
+			{
+				if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+				{
+					Guide->ArmGuideOnNextMoveInput(UnloadedGuide);
+				}
 			}
 
 			UnloadedPawn.Reset();
+			UnloadedGoalCell = FIntPoint(-1, -1);
+			UnloadedGuide = EGuideType::None;
 		}
 	}
 
@@ -670,7 +1129,13 @@ void AGridTrain::Tick(float DeltaSeconds)
 		}
 
 		const float Alpha = static_cast<float>(FMath::Clamp(MoveDistance / MoveLength, 0.0, 1.0));
-		MoveDistance += Speed * GetSpeedFactor(Alpha) * DeltaSeconds;
+		const double CurrentSpeed = Speed * GetSpeedFactor(Alpha);
+		MoveDistance += CurrentSpeed * DeltaSeconds;
+
+		UpdateArrivalSounds();
+
+		// 바퀴가 가감속을 따라 빨라지고 느려진다.
+		UpdateWheelPlayRate(CurrentSpeed);
 
 		if (MoveDistance >= MoveLength)
 		{
@@ -781,23 +1246,80 @@ bool AGridTrain::TryBoard(AGridPawn* Pawn, FText* OutReason)
 		return false;
 	}
 
-	// 좌석은 차체 중심이 아니라 **폰을 마주 보는 자리**다. 진행축(로컬 X) 위의 자리는 폰의
-	// 것을 그대로 쓰고 폭 방향만 중심선으로 당기므로, 폰은 자기가 선 문으로 똑바로 걸어
-	// 들어간다. 중심으로 잡으면 45 m짜리 객차 끝에서 탄 폰이 차체를 따라 비스듬히 미끄러져
-	// 들어가 어느 문으로 탔는지도, 탄 것인지도 읽히지 않는다.
-	const FVector Seat = LTTSVehicle::SeatFacingRider(
-		Pawn->GetActorLocation(),
-		GetActorLocation(),
-		GetActorForwardVector(),
-		FMath::Max(BodyLength * 0.5 - 100.0, 0.0),
-		GetActorLocation().Z + Pawn->HeightAboveFloor);
+	// 좌석은 **폰이 선 문의 한가운데**다(두 문짝 사이). 진행축(로컬 X) 위의 자리는 가장 가까운
+	// 문 중심에서, 폭 방향은 중심선에서 가져온다.
+	//
+	// 높이는 **폰이 지금 서 있는 높이 그대로**다. 걸어 들어가는 동안에도, 타고 가는 동안에도
+	// 바뀌지 않는다. 예전에는 객차 바닥 + 폰의 높이로 잡아 승강장에서 차체로 들어가며 공이
+	// 가라앉았다(2026-09-15 요청).
+	//
+	// 폰의 자리를 그대로 투영하던 시절에는 문 폭에 걸친 탑승 셀 가운데 가장자리 칸에서 타면
+	// 문짝 바깥, 곧 문틀과 벽을 지나 들어갔다(2026-09-15). 차체 중심으로 잡으면 45 m짜리 객차
+	// 끝에서 탄 폰이 차체를 따라 비스듬히 미끄러져 들어간다.
+	TArray<float> Offsets;
+	GetDoorOffsets(Offsets);
 
-	Pawn->BoardVehicle(this, Seat);
+	const FVector Centre = GetActorLocation();
+	const FVector Axis = GetActorForwardVector();
+	const FVector PawnLocation = Pawn->GetActorLocation();
+	const double SeatZ = PawnLocation.Z;
+	const double CellSize = Grid ? Grid->CellSize : 100.0;
+
+	const int32 Door = LTTSVehicle::NearestDoorIndex(PawnLocation, Centre, Axis, Offsets);
+	const double PawnAlong = LTTSVehicle::AlongAxis(PawnLocation, Centre, Axis);
+	const bool bInFrontOfDoor = Offsets.IsValidIndex(Door)
+		&& FMath::Abs(PawnAlong - Offsets[Door]) <= DoorWidth * 0.5 + CellSize;
+
+	// 들어가기 전에 문 한가운데와 일직선이 되는 자리로 옮겨 선다: 폰의 자리를 진행축 방향으로만
+	// 옮긴 점이다. 거기서 좌석까지는 차체 면에 수직인 직선이다.
+	//
+	// 그 자리가 걸을 수 없는 칸(승강장의 기둥이나 계단)이면 옮기지 않고 지금 자리에서 들어간다.
+	// 셀 판정 없이 옆으로 걸어가면 공이 구조물 속으로 파고든다.
+	TOptional<FVector> Approach;
+	bool bApproachBlocked = false;
+	if (bInFrontOfDoor)
+	{
+		const FVector AxisFlat = FVector(Axis.X, Axis.Y, 0.0).GetSafeNormal();
+		FVector InLine = PawnLocation + AxisFlat * (Offsets[Door] - PawnAlong);
+		InLine.Z = PawnLocation.Z;
+
+		if (!InLine.Equals(PawnLocation, 1.0))
+		{
+			const FIntPoint InLineCell = Grid ? Grid->WorldToCell(InLine) : Pawn->GetCurrentCell();
+			const bool bSameCell = InLineCell == Pawn->GetCurrentCell();
+			const bool bFree = Grid && Grid->IsValidCell(InLineCell)
+				&& Grid->IsCellWalkableStatic(InLineCell)
+				&& !Grid->IsCellOccupied(InLineCell, Pawn);
+
+			if (bSameCell || bFree)
+			{
+				Approach = InLine;
+			}
+			else
+			{
+				bApproachBlocked = true;
+			}
+		}
+	}
+
+	// 손으로 적은 탑승 셀이 문 위치와 어긋난 맵(그레이박스)에서는 예전처럼 폰을 마주 보는 자리로
+	// 들어간다. 먼 문으로 끌고 가 차체를 따라 미끄러지게 하는 것보다 낫다.
+	const FVector Seat = bInFrontOfDoor
+		? LTTSVehicle::SeatAtDoor(Centre, Axis, Offsets[Door], GetSeatHalfExtent(), SeatZ)
+		: LTTSVehicle::SeatFacingRider(Pawn->GetActorLocation(), Centre, Axis, GetSeatHalfExtent(), SeatZ);
+
+	Pawn->BoardVehicle(this, Seat, nullptr, Approach);
 	Rider = Pawn;
 
 	UE_LOG(LogLTTSGrid, Display,
-		TEXT("%s: %s boarded at stop %d '%s'."),
-		*GetName(), *Pawn->GetName(), CurrentStop, *Stops[CurrentStop].StopName.ToString());
+		TEXT("%s: %s boarded at stop %d '%s' from cell (%d,%d) %s (seat %.0f cm along the track, height %.0f)%s."),
+		*GetName(), *Pawn->GetName(), CurrentStop, *Stops[CurrentStop].StopName.ToString(),
+		Pawn->GetCurrentCell().X, Pawn->GetCurrentCell().Y,
+		bInFrontOfDoor ? *FString::Printf(TEXT("through door %d"), Door) : TEXT("facing the rider (no door in front)"),
+		LTTSVehicle::AlongAxis(Seat, Centre, Axis), SeatZ,
+		Approach.IsSet()
+			? *FString::Printf(TEXT(", lining up %.0f cm first"), Offsets[Door] - PawnAlong)
+			: (bApproachBlocked ? TEXT(", the spot in line with the door is blocked so entering at an angle") : TEXT("")));
 
 	// 플레이어가 탔으니 더 기다릴 이유가 없다. 남은 대기 시간을 버리고 문을 닫는다.
 	if (bDepartAfterBoarding)
@@ -885,6 +1407,46 @@ namespace
 		}
 	}
 
+	void TrainRideCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.TrainRide: run this in play mode."));
+			return;
+		}
+
+		AGridPlayerController* Controller = Cast<AGridPlayerController>(World->GetFirstPlayerController());
+		if (!Controller)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.TrainRide: no grid player controller."));
+			return;
+		}
+
+		const FString Filter = Args.IsValidIndex(0) ? Args[0] : FString();
+		AGridTrain* Train = FindTrain(World, Filter);
+		if (!Train)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.TrainRide: no train matching '%s'."), *Filter);
+			return;
+		}
+
+		// 시작 셀을 주면 폰을 거기로 옮긴 뒤 탄다. 문 가장자리 칸에서 타는 경우처럼 폰이 설 자리를
+		// 정해 두고 시험할 때 쓴다. 옮기는 것만 시험용이고, 탑승은 클릭과 같은 경로를 탄다.
+		if (Args.IsValidIndex(2))
+		{
+			const FIntPoint StartCell(FCString::Atoi(*Args[1]), FCString::Atoi(*Args[2]));
+			if (AGridPawn* Pawn = Cast<AGridPawn>(Controller->GetPawn()))
+			{
+				Pawn->TeleportToCell(StartCell);
+				UE_LOG(LogLTTSGrid, Display, TEXT("ltts.TrainRide: moved %s to cell (%d,%d)."),
+					*Pawn->GetName(), StartCell.X, StartCell.Y);
+			}
+		}
+
+		UE_LOG(LogLTTSGrid, Display, TEXT("ltts.TrainRide: asking to board %s."), *Train->GetActorNameOrLabel());
+		Controller->RequestTrainBoarding(Train);
+	}
+
 	void TrainDoorsCommand(const TArray<FString>& Args, UWorld* World)
 	{
 		if (!World || !World->IsGameWorld())
@@ -911,6 +1473,11 @@ static FAutoConsoleCommandWithWorldAndArgs GTrainArriveCommand(
 	TEXT("ltts.TrainArrive"),
 	TEXT("Bring a train into its next stop right now: ltts.TrainArrive [name substring]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&TrainArriveCommand));
+
+static FAutoConsoleCommandWithWorldAndArgs GTrainRideCommand(
+	TEXT("ltts.TrainRide"),
+	TEXT("Board a train as if it were clicked: ltts.TrainRide [name substring] [start cell X] [start cell Y]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&TrainRideCommand));
 
 static FAutoConsoleCommandWithWorldAndArgs GTrainDoorsCommand(
 	TEXT("ltts.TrainDoors"),

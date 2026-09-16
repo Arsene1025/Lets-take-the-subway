@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Camera/PlayerCameraManager.h"
 #include "GameFramework/Info.h"
+#include "UI/Guide/GuideType.h"
 #include "StageInfo.generated.h"
 
 class ACameraActor;
@@ -30,8 +31,8 @@ class LETSTAKETHESUBWAY_API AStageInfo : public AInfo
 public:
 	AStageInfo(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-	/** 스테이지 번호. 1부터 센다. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage Info", meta = (ClampMin = 1))
+	/** 스테이지 번호. 1부터 센다. 튜토리얼은 0이다(2026-09-16). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage Info", meta = (ClampMin = 0))
 	int32 StageIndex = 1;
 
 	/** UI에 보여 줄 스테이지 이름. 비워 둬도 동작한다. */
@@ -72,6 +73,32 @@ public:
 	/** 구역 번호(1부터)의 카메라. 범위 밖이거나 칸이 비어 있으면 null. */
 	UFUNCTION(BlueprintPure, Category = "Stage Info|Camera")
 	ACameraActor* GetZoneCamera(int32 ZoneIndex) const;
+
+	// ---------------------------------------------------------------- UI (2026-09-16)
+
+	/**
+	 * 구역마다 PathUI가 보여 줄 그림 번호. 배열 0번이 구역 1이다(ZoneCameras와 같은 규칙).
+	 *
+	 * 플레이어가 구역을 옮기면 UUIManagerSubsystem이 이 값을 읽어 ShowOrRefreshPathUI로 넘긴다.
+	 * -1이거나 칸이 없으면 그 구역에 들어가도 PathUI를 바꾸지 않는다(직전 그림 유지).
+	 *
+	 * 번호 규칙: Stage1 구역 1~4 = 0~3(4는 클리어 엘리베이터 탑승, APuzzleElevatorDock::ClearPathUIIndex),
+	 * Stage2 구역 1·3·4·6·8 = 5~9.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage Info|UI")
+	TArray<int32> ZonePathUIIndices;
+
+	/**
+	 * 레벨 시작 판정 직후 순서대로 요청할 가이드 팝업.
+	 *
+	 * 팝업 위젯은 하나라 여럿을 넣으면 마지막 것만 보인다(대기열 없음). 이미 본 가이드는 다시 뜨지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage Info|UI")
+	TArray<EGuideType> EntryGuides;
+
+	/** 구역 번호(1부터)의 PathUI 그림 번호. 범위 밖이거나 적지 않았으면 -1. */
+	UFUNCTION(BlueprintPure, Category = "Stage Info|UI")
+	int32 GetPathUIIndex(int32 ZoneIndex) const;
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

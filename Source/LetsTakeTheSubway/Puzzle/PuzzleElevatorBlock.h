@@ -7,6 +7,7 @@
 #include "PuzzleElevatorBlock.generated.h"
 
 class AGridPawn;
+class UAudioComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnElevatorBoarded, APuzzleElevatorBlock*, Elevator, APawn*, Pawn);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnElevatorArrived, APuzzleElevatorBlock*, Elevator, APawn*, Pawn);
@@ -61,6 +62,14 @@ public:
 	 */
 	UPROPERTY(BlueprintAssignable, Category = "Elevator")
 	FOnElevatorHoldReached OnHoldReached;
+
+	/** 층 사이를 오가는 동안의 루프(DA_SoundLibrary 키). 차체에 붙는다. */
+	UPROPERTY(EditAnywhere, Category = "Elevator|Sound")
+	FName MovingSoundKey = LTTSSoundKeys::ElevatorMoving;
+
+	/** 목표 높이에 닿았을 때의 도착음. 클리어 승강(허공 정지)에도 난다. */
+	UPROPERTY(EditAnywhere, Category = "Elevator|Sound")
+	FName ArrivedSoundKey = LTTSSoundKeys::ElevatorArrived;
 
 	// ---------------------------------------------------------------- 문
 
@@ -232,6 +241,9 @@ private:
 	bool bHoldAtTarget = false;
 
 	TWeakObjectPtr<AGridPawn> Rider;
+
+	/** 승강 중 루프. 도착·중단 때 멈춘다. */
+	TWeakObjectPtr<UAudioComponent> MovingAudio;
 
 	double TravelTargetZ = 0.0;
 	FVector TravelExitWorld = FVector::ZeroVector;
