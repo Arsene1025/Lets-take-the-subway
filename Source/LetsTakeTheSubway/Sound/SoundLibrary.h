@@ -43,6 +43,20 @@ struct LETSTAKETHESUBWAY_API FSoundLibraryEntry
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sound", meta = (ClampMin = 0.0))
 	float MinRetriggerSeconds = 0.0f;
+
+	/**
+	 * 같은 키의 소리가 **아직 들리는 동안** 다시 부르면 건너뛴다.
+	 *
+	 * 클립보다 짧은 간격으로 발동하는 소리가 겹겹이 쌓이는 것을 막는다: 블록을 이어 밀면
+	 * 한 칸에 1/6초인데 드래그 소리는 0.44초라, 이것이 없으면 같은 소리가 두세 겹으로 난다.
+	 * MinRetriggerSeconds와 달리 숫자를 손으로 맞출 필요가 없다 -- 애셋이 길어지면 간격도
+	 * 따라 길어진다.
+	 *
+	 * **루프 사운드에는 걸리지 않는다.** 그쪽은 호출자가 컴포넌트를 들고 있다가 StopSound로
+	 * 끄는 구조라, 페이드 아웃 중에 건너뛰면 새 루프를 잃고 이전 루프의 제어권도 사라진다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sound")
+	bool bSkipWhilePlaying = true;
 };
 
 /**

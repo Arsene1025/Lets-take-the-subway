@@ -167,6 +167,25 @@ bool UGameSoundSubsystem::Resolve(FName Key, const FSoundLibraryEntry*& OutEntry
 		return false;
 	}
 
+	// 아직 들리고 있는 소리는 다시 틀지 않는다. MinRetriggerSeconds보다 **앞**에 두는 이유는,
+	// 건너뛴 호출이 마지막 재생 시각을 갱신해 버리면 간격 계산이 밀리기 때문이다.
+	//
+	// 루프는 예외다: 호출자가 컴포넌트를 들고 있다가 StopSound로 끄는 구조라(열차의 접근·실내
+	// 소리, 엘리베이터의 이동 소리), 이전 루프가 페이드 아웃 중일 때 null을 돌려주면 새 루프를
+	// 잃고 이전 루프의 제어권도 함께 사라진다.
+	if (Entry->bSkipWhilePlaying && !(*Loaded)->IsLooping())
+	{
+		if (const TWeakObjectPtr<UAudioComponent>* Active = ActiveSounds.Find(Key))
+		{
+			// 페이드 아웃 중에도 IsPlaying()은 참이다. "아직 들리는 동안"이 이 게이트가
+			// 뜻하는 바이므로 그대로 둔다.
+			if (Active->IsValid() && (*Active)->IsPlaying())
+			{
+				return false;
+			}
+		}
+	}
+
 	if (Entry->MinRetriggerSeconds > 0.0f)
 	{
 		const double Now = FPlatformTime::Seconds();
@@ -197,6 +216,16 @@ USoundAttenuation* UGameSoundSubsystem::ResolveAttenuation(const FSoundLibraryEn
 	return DefaultAttenuation;
 }
 
+UAudioComponent* UGameSoundSubsystem::Track(FName Key, UAudioComponent* Component)
+{
+	if (Component)
+	{
+		ActiveSounds.Add(Key, Component);
+	}
+
+	return Component;
+}
+
 UAudioComponent* UGameSoundSubsystem::PlaySound2D(FName Key)
 {
 	const FSoundLibraryEntry* Entry = nullptr;
@@ -208,7 +237,7 @@ UAudioComponent* UGameSoundSubsystem::PlaySound2D(FName Key)
 		return nullptr;
 	}
 
-	return UGameplayStatics::SpawnSound2D(World, Sound, Entry->Volume, Entry->Pitch);
+	return Track(Key, UGameplayStatics::SpawnSound2D(World, Sound, Entry->Volume, Entry->Pitch));
 }
 
 UAudioComponent* UGameSoundSubsystem::PlaySoundAtLocation(FName Key, FVector Location)
@@ -222,8 +251,8 @@ UAudioComponent* UGameSoundSubsystem::PlaySoundAtLocation(FName Key, FVector Loc
 		return nullptr;
 	}
 
-	return UGameplayStatics::SpawnSoundAtLocation(World, Sound, Location, FRotator::ZeroRotator,
-		Entry->Volume, Entry->Pitch, 0.0f, ResolveAttenuation(*Entry));
+	return Track(Key, UGameplayStatics::SpawnSoundAtLocation(World, Sound, Location, FRotator::ZeroRotator,
+		Entry->Volume, Entry->Pitch, 0.0f, ResolveAttenuation(*Entry)));
 }
 
 UAudioComponent* UGameSoundSubsystem::PlaySoundAttached(FName Key, USceneComponent* AttachTo)
@@ -241,9 +270,9 @@ UAudioComponent* UGameSoundSubsystem::PlaySoundAttached(FName Key, USceneCompone
 		return nullptr;
 	}
 
-	return UGameplayStatics::SpawnSoundAttached(Sound, AttachTo, NAME_None, FVector::ZeroVector,
+	return Track(Key, UGameplayStatics::SpawnSoundAttached(Sound, AttachTo, NAME_None, FVector::ZeroVector,
 		EAttachLocation::KeepRelativeOffset, /*bStopWhenAttachedToDestroyed*/ true,
-		Entry->Volume, Entry->Pitch, 0.0f, ResolveAttenuation(*Entry));
+		Entry->Volume, Entry->Pitch, 0.0f, ResolveAttenuation(*Entry)));
 }
 
 void UGameSoundSubsystem::StopSound(UAudioComponent* AudioComponent, float FadeOutSeconds)

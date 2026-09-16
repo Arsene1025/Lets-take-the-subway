@@ -88,8 +88,11 @@ public:
 	void LogLibrary() const;
 
 private:
-	/** 키를 풀어 재생할 사운드와 항목을 얻는다. 재연결 간격에 걸리면 false. */
+	/** 키를 풀어 재생할 사운드와 항목을 얻는다. 재연결 간격이나 재생 중 판정에 걸리면 false. */
 	bool Resolve(FName Key, const FSoundLibraryEntry*& OutEntry, USoundBase*& OutSound);
+
+	/** 방금 스폰한 컴포넌트를 키에 기록한다. 다음 호출의 "아직 재생 중인가" 판정 근거다. */
+	UAudioComponent* Track(FName Key, UAudioComponent* Component);
 
 	/** 항목의 감쇠, 없으면 기본 감쇠. */
 	USoundAttenuation* ResolveAttenuation(const FSoundLibraryEntry& Entry) const;
@@ -120,6 +123,14 @@ private:
 
 	/** 키마다 마지막으로 재생한 시각(실시간 초). MinRetriggerSeconds 판정용. */
 	TMap<FName, double> LastPlayTime;
+
+	/**
+	 * 키마다 마지막으로 스폰한 컴포넌트. bSkipWhilePlaying 판정용.
+	 *
+	 * 약참조인 이유는 스폰된 컴포넌트가 끝나면 스스로 파괴되기 때문이다(bAutoDestroy).
+	 * 무효해진 참조는 "재생 중이 아님"과 같은 뜻이므로 따로 지울 필요가 없다.
+	 */
+	TMap<FName, TWeakObjectPtr<UAudioComponent>> ActiveSounds;
 
 	/** 이미 경고한 키. 매 호출마다 같은 줄이 쌓이지 않게 한다. */
 	mutable TSet<FName> ReportedKeys;

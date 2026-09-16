@@ -223,7 +223,7 @@ UPROPERTY(Config, BlueprintReadWrite) float MasterVolume = 1.0f;
 | `Elevator.Arrived` | 같은 목표 도달 분기 | 부착 원샷 | 클리어 승강(Holding)에도 난다. 원치 않으면 `bHoldAtTarget`일 때 건너뛰는 분기 하나 |
 | `World.Turnstile` | `ASoundCellTrigger`(3.7) | 위치 원샷 | 트리거의 `MinRetriggerSeconds` 0.15 s — 행인 무리가 한 번에 지나면 삑이 겹친다 |
 | `UI.Click` | `AGridPlayerController::OnPressed` 첫 줄 | 2D 원샷 | 월드 클릭. **UMG 버튼**은 코드 없이 버튼 스타일의 Pressed Sound에 `SW_11_Click`을 넣는다(SoundClass `SC_UI`라 슬라이더가 잡는다) |
-| `Puzzle.Slide` | `APuzzleBlock::StartSlide` 성공 직후 | 블록 부착 원샷 | 이어 밀기는 `Tick`이 `StartSlide`를 다시 부르므로 칸마다 한 번 — 배치표의 "드르륵". 너무 잦으면 라이브러리 `MinRetriggerSeconds`로 솎는다 |
+| `Puzzle.Slide` | `APuzzleBlock::StartSlide` 성공 직후 | 블록 부착 원샷 | 이어 밀기는 `Tick`이 `StartSlide`를 다시 부르므로 칸마다 한 번 — 배치표의 "드르륵". 칸 하나가 1/6초(`SlideSpeed` 600)인데 클립이 0.44 s라 그대로 두면 겹친다. **`bSkipWhilePlaying`(3.10)이 막는다** |
 | `Puzzle.Jam` | `UpdateDrag` 거부 분기(`ShowFeedback(Reason)` 옆) | 블록 부착 원샷 | 이미 방향당 한 번으로 걸러져 있어 연타되지 않는다 |
 | `Puzzle.TileRotate` | `APuzzleRotationTile::TryRotate` 커밋 패스 끝 | 타일 위치 원샷 | 검사 패스에서 거부되면 나지 않는다 |
 | `Puzzle.PillarRotate` | `APuzzleRotatingObstacle::TryRotate` 커밋 패스 | 장애물 부착 원샷 | 기둥·큰 장애물 공통. 인스턴스별 키 오버라이드로 갈라진다(3.8) |
@@ -299,6 +299,32 @@ DefaultAttenuation=/Game/Core/Sound/ATT_World.ATT_World
 ```
 
 `LetsTakeTheSubway.Build.cs`: 추가 모듈 없음(`Engine`에 오디오가 있다). `AudioMixer`는 필요 없다.
+
+### 3.10 겹침 방지 — `bSkipWhilePlaying` (2026-09-16)
+
+**문제.** 오브젝트를 드래그하는 동안 같은 소리가 겹겹이 쌓여 거슬린다는 피드백이 왔다. 원인은
+발동 간격이 클립보다 짧은 것이다: 블록은 한 칸을 1/6초에 지나가는데(`SlideSpeed` 600 cm/s,
+셀 100 cm) `SW_12_PuzzleDrag`는 0.44초다. PIE에서 재어 보니 한 번 끄는 동안 같은 키의
+오디오 컴포넌트가 **최대 7개까지 동시에** 살아 있었다.
+
+**규칙.** `FSoundLibraryEntry::bSkipWhilePlaying`(기본 **켬**)이 켜져 있으면, 같은 키의 소리가
+아직 들리는 동안 들어온 재생 요청을 건너뛴다. `UGameSoundSubsystem`이 키마다 마지막으로 스폰한
+컴포넌트를 약참조로 들고 있다가(`ActiveSounds`) `IsValid() && IsPlaying()`이면 `Resolve`가
+false를 돌려준다. 같은 측정에서 최대 **1개**로 떨어졌다.
+
+- **`MinRetriggerSeconds`보다 앞에서 검사한다.** 건너뛴 호출이 마지막 재생 시각을 갱신해 버리면
+  간격 계산이 밀린다.
+- **숫자를 손으로 맞추지 않아도 된다.** `MinRetriggerSeconds`는 애셋 길이가 바뀔 때마다 다시
+  맞춰야 하지만, 이쪽은 실제 재생이 끝나는 것을 본다. 둘은 함께 쓸 수 있다.
+- **루프 사운드는 제외된다**(`USoundBase::IsLooping()`). `Train.Approach`·`Train.Inside`·
+  `Elevator.Moving`은 호출자가 컴포넌트를 들고 있다가 `StopSound`로 끄는 구조라, 이전 루프가
+  페이드 아웃 중일 때 null을 돌려주면 새 루프를 잃고 이전 루프의 제어권도 함께 사라진다.
+- **페이드 아웃 중에도 `IsPlaying()`은 참이다.** "아직 들리는 동안"이 이 게이트가 뜻하는
+  바이므로 그대로 둔다.
+- 게이트는 **키 단위 전역**이다. 같은 키를 쓰는 액터가 여럿이면(기둥 여러 개가 함께 도는 경우)
+  한 번에 하나만 난다. 여러 개가 함께 나야 하는 소리는 이 스위치를 끈다.
+
+**지금 꺼 둔 키:** `UI.Click` 하나. 빠른 연타에서 클릭음이 먹히면 입력이 씹힌 것처럼 느껴진다.
 
 ## 4. 나중에 사운드를 더하는 방법
 
