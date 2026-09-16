@@ -18,7 +18,7 @@
 
 APuzzleRotationTile::APuzzleRotationTile()
 {
-	CornerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CornerMesh"));
+	/*CornerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CornerMesh"));
 	CornerMesh->SetupAttachment(SceneRoot);
 	CornerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CornerMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -35,7 +35,7 @@ APuzzleRotationTile::APuzzleRotationTile()
 	if (MaterialFinder.Succeeded())
 	{
 		CornerMesh->SetMaterial(0, MaterialFinder.Object);
-	}
+	}*/
 }
 
 // ------------------------------------------------------------------------ 생명주기
@@ -72,13 +72,13 @@ void APuzzleRotationTile::RefreshVisual()
 {
 	Super::RefreshVisual();
 
-	if (CornerMesh)
+	/*if (CornerMesh)
 	{
 		const double CellSize = GetGrid() ? GetGrid()->CellSize : 100.0;
 		const double Inset = (SizeInCells - 1) * CellSize * 0.5;
 		CornerMesh->SetRelativeLocation(FVector(Inset, Inset, 14.0));
 		CornerMesh->SetRelativeScale3D(FVector(CellSize / 200.0, CellSize / 200.0, 0.12));
-	}
+	}*/
 }
 
 FString APuzzleRotationTile::DescribeTile() const
