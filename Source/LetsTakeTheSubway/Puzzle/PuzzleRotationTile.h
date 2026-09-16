@@ -68,8 +68,8 @@ protected:
 
 private:
 	/** 한쪽 모서리에 놓여, 레벨에서 회전 방향이 한눈에 읽히게 한다. */
-	UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
-	TObjectPtr<UStaticMeshComponent> CornerMesh;
+	/*UPROPERTY(VisibleAnywhere, Category = "Rotation Tile")
+	TObjectPtr<UStaticMeshComponent> CornerMesh;*/
 
 	/** 이번 발동에 쓸 TurnSign. Free가 아니면 설정된 방향이 그대로 나온다. */
 	int32 ResolveTurnSign() const;
