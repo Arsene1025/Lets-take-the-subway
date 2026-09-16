@@ -30,6 +30,9 @@ public:
     UPROPERTY(Config, EditAnywhere, Category = "Screens")
     TSoftClassPtr<UUserWidget> AlertUIWidget;
 
+    UPROPERTY(Config, EditAnywhere, Category = "Screens")
+    TSoftClassPtr<UUserWidget> CutsceneWidget;
+
 
     UPROPERTY(Config, EditAnywhere, Category = "Data")
     TSoftObjectPtr<UGuideDatabase> GuideDatabase;
