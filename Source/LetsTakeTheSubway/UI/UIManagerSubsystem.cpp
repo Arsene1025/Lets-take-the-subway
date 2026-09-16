@@ -244,6 +244,42 @@ void UUIManagerSubsystem::ShowAlertUI(FText message)
     }
 }
 
+void UUIManagerSubsystem::PlayCutscene(int32 cutscene)
+{
+    ULocalPlayer* LP = GetLocalPlayer();
+    if (!LP)
+        return;
+
+    UWorld* World = LP->GetWorld();
+    if (!World)
+        return;
+
+    APlayerController* PC = LP->GetPlayerController(World);
+    if (!PC)
+        return;
+
+
+    const UUISettings* Settings = GetDefault<UUISettings>();
+    UClass* WidgetClass = Settings->CutsceneWidget.LoadSynchronous();
+    if (!WidgetClass)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[UIManager] 위젯 클래스가 지정되지 않았습니다. "));
+        return;
+    }
+
+    CutsceneWidget = CreateWidget<UUserWidget>(PC, WidgetClass);
+    if (!CutsceneWidget)
+        return;
+
+    CutsceneWidget->AddToViewport(100);   // Z 순서 높게
+
+    if (CutsceneWidget->GetClass()->ImplementsInterface(UUIInitializable::StaticClass()))
+    {
+        IUIInitializable::Execute_InitializeInt(CutsceneWidget, cutscene);
+    }
+}
+
 #pragma endregion
 
 
@@ -253,6 +289,7 @@ void UUIManagerSubsystem::ShowAlertUI(FText message)
 void UUIManagerSubsystem::CallUIOpened()
 {
     //[2026/09/16] 첫 UI가 열릴 때만 입력 모드를 바꾼다. 겹쳐 열린 UI는 개수만 센다.
+    // --> 개수 셀 필요가 없게 bp단에서 특수화를 해뒀는데... 왜한거임?
     ++OpenUICount;
     if (OpenUICount == 1)
     {
@@ -276,6 +313,15 @@ void UUIManagerSubsystem::CallUIClosed()
     }
 
     OnUIClosed.Broadcast();
+}
+
+void UUIManagerSubsystem::EndCutscene()
+{
+    if (IsValid(CutsceneWidget))
+    {
+        CutsceneWidget->RemoveFromParent();
+    }
+    CutsceneWidget = nullptr;
 }
 
 #pragma endregion
