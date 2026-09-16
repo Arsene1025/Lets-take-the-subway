@@ -244,6 +244,20 @@ UPROPERTY(Config, BlueprintReadWrite) float MasterVolume = 1.0f;
 
 트리거는 개찰구 한 줄에 박스 하나로 덮는다. Stage2의 `SM_L1_TicketGate*` 열이 대상이다.
 
+Stage2에 실제로 놓은 값은 아래와 같다. 맵이 통째로 교체되면 트리거도 같이 사라지므로
+(2026-09-16에 ART_2 병합으로 한 번 그랬다) 다시 만들 수 있게 적어 둔다. 기준 그리드는
+`StationGrid`(원점 `(-35827, -5324, 8070)`, `CellSize` 100, 390×278셀)다.
+
+| 액터 | 액터 위치 | `Box` extent | 덮는 게이트 | 셀 |
+|---|---|---|---|---|
+| `SoundTrigger_TicketGate_A` | `(510.05, -3449, 8420)` | `(726.25, 102, 100)` | `SM_L1_TicketGate001`~`006` | X 356~370 × Y 18~19 = 30셀 |
+| `SoundTrigger_TicketGate_B` | `(-32710.35, 12449, 8420)` | `(1079.65, 102, 100)` | `SM_L1_TicketGate007`~`015` | X 20~41 × Y 177~178 = 44셀 |
+
+둘 다 아웃라이너 폴더 `Sound`, 프로퍼티는 기본값 그대로다. A의 박스는 게이트 열의 바운딩 박스와
+같다. B는 그 바운딩 박스(X `-33733.2`~`-31630.7`)만으로는 셀 열이 21개라 42셀에 그쳐서, 서쪽 변을
+`-33790`까지 56.8 cm 늘려 셀 한 열(중심 X `-33777`)을 더 넣었다. Z는 셀 계산에 쓰이지 않는다 —
+`WorldToCell`은 XY만 본다. 에디터에서 박스가 게이트 높이에 걸쳐 보이도록 맞춘 값이다.
+
 ### 3.8 액터별 키 오버라이드 (확장 패턴)
 
 각 액터에 `Category = "Sound"`로 키 프로퍼티를 둔다. 기본값은 `SoundKeys.h`의 표준 키.
@@ -355,7 +369,7 @@ DefaultAttenuation=/Game/Core/Sound/ATT_World.ATT_World
 | 빌드 | 게임 타깃, 에디터 타깃 모두 성공. 프로젝트 파일 경고 없음 |
 | 애셋 | `Content/Core/Sound/`: `SC_Master`(자식 `SC_SFX`·`SC_Ambience`·`SC_UI`·`SC_Music`), `SMix_Master`, `ATT_World`(구, 안쪽 3000 cm + 감쇠 9000 cm). `Content/Art/Sound/SFX/`: `SW_01`~`SW_16` 15개, 클래스 지정, `SW_05`·`SW_08` 루프. `Content/Design/Sound/DA_SoundLibrary`: 키 17개, `Train.ArrivalAnnouncement`·`Stage.Clear`는 빈 채 |
 | 위젯 | `WBP_SideMenuUI`, `WBP_MainUI`: `Slider`를 변수로 노출, `OnValueChanged(Slider)` -> `ApplyMasterVolume`, `OpenSettingPanel` 끝에 `Slider.Value = GetMasterVolume`, `CloseSettingPanel` 끝에 `CommitSettings`. 슬라이더 범위 0~1 |
-| 개찰구 | `Subway_Stage2`에 `SoundTrigger_TicketGate_A`(게이트 001~006, 30셀)·`_B`(게이트 007~015, 44셀), 아웃라이너 폴더 `Sound`. Stage2는 액터별 파일 방식이 아니라 `Subway_Stage2.umap` 자체가 바뀌었다 |
+| 개찰구 | `Subway_Stage2`에 `SoundTrigger_TicketGate_A`(게이트 001~006, 30셀)·`_B`(게이트 007~015, 44셀), 아웃라이너 폴더 `Sound`. Stage2는 액터별 파일 방식이 아니라 `Subway_Stage2.umap` 자체가 바뀌었다. 위치·extent 값은 3.7절 표에 있다 |
 
 ### PIE 확인 (Subway_Stage2)
 
