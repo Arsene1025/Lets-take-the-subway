@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -18,6 +18,10 @@ class LETSTAKETHESUBWAY_API UUISettings : public UDeveloperSettings
 
 
 public:
+    /** 타이틀 레벨(ATitleGameMode)이 BeginPlay에서 띄우는 메인 메뉴. */
+    UPROPERTY(Config, EditAnywhere, Category = "Screens")
+    TSoftClassPtr<UUserWidget> MainUIWidget;
+
     UPROPERTY(Config, EditAnywhere, Category = "Screens")
     TSoftClassPtr<UUserWidget> PathUIWidget;
 

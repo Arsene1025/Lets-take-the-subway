@@ -8,7 +8,7 @@
 class AGridActor;
 class UWorld;
 
-/** ltts.GridDebug -- 0 끔, 1 HUD 텍스트만, 2 HUD 텍스트에 월드 내 경로와 호버까지. */
+/** ltts.GridDebug -- 0 끔(기본), 1 HUD 텍스트만, 2 HUD 텍스트에 월드 내 경로와 호버까지. */
 extern TAutoConsoleVariable<int32> CVarGridDebug;
 
 namespace LTTSGridDebug
