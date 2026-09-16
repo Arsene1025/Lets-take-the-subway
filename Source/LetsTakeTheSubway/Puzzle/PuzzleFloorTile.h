@@ -9,6 +9,8 @@
 
 class AGridActor;
 class APuzzleBlock;
+class UMaterialInterface;
+class UStaticMesh;
 class UStaticMeshComponent;
 
 /**
@@ -35,6 +37,40 @@ public:
 	/** 한 변의 길이(셀 단위). */
 	UPROPERTY(EditAnywhere, Category = "Floor Tile", meta = (ClampMin = 2, ClampMax = 16))
 	int32 SizeInCells = 4;
+
+	// ---------------------------------------------------------------- 아트
+	//
+	// 블록의 ArtMesh 슬롯(APuzzleBlock)과 같은 규약이다. 다만 타일은 프록시를 남길 이유가
+	// 없어 컴포넌트를 따로 두지 않고 PadMesh의 메시를 갈아 끼운다 -- 패드는 애초에 콜리전이
+	// 없어(생성자) 커서 판정에도, 그리드 생성에도 관여하지 않는다.
+
+	/**
+	 * 그레이박스 패드 대신 보여 줄 스태틱 메시. 비우면 지금까지처럼 납작한 큐브를 그린다.
+	 *
+	 * 파생 클래스가 생성자에서 기본값을 잡아 두므로 레벨에 놓기만 하면 아트가 따라온다.
+	 * 인스턴스마다 다른 메시를 쓰고 싶으면 여기서 덮어쓴다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Floor Tile|Art")
+	TObjectPtr<UStaticMesh> ArtMesh;
+
+	/**
+	 * 아트 메시를 타일 원점(영역 중심의 바닥)에 맞추는 보정.
+	 *
+	 * 스케일은 여기에 넣지 않아도 된다: XY는 영역 크기에 맞춰 코드가 계산하고, 이 값의
+	 * 스케일은 그 위에 곱해진다. 피벗이 바닥 중앙이 아닌 메시의 Z 보정이 주된 용도다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Floor Tile|Art")
+	FTransform ArtMeshOffset = FTransform::Identity;
+
+	/**
+	 * 아트 메시의 슬롯 0에 씌울 머티리얼. 비우면 메시 자신의 머티리얼을 그대로 쓴다.
+	 *
+	 * 블록의 ArtFallbackMaterial과 달리 **덮어쓴다**. 층 구분과 도킹 상태를 색으로 읽는
+	 * 것이 타일의 기능이라(엘리베이터 구조물의 Idle/Ready), 슬롯이 이미 칠해져 있는지와
+	 * 무관하게 코드가 색을 쥐고 있어야 한다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Floor Tile|Art")
+	TObjectPtr<UMaterialInterface> ArtMaterial;
 
 	// ---------------------------------------------------------------- 조회
 
@@ -92,7 +128,7 @@ public:
 #endif
 
 protected:
-	/** 패드와 장식의 크기를 SizeInCells에 맞춘다. */
+	/** 패드와 장식의 크기를 SizeInCells에 맞춘다. ArtMesh가 있으면 그쪽을 그린다. */
 	virtual void RefreshVisual();
 
 	/** BeginPlay 로그 끝에 붙는 한 마디. 파생 클래스가 자기 설정을 알린다. */
@@ -125,7 +161,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Floor Tile")
 	TObjectPtr<USceneComponent> SceneRoot;
 
-	/** 영역을 표시하는 평평한 패드. 클릭 트레이스와 바닥 트레이스가 통과하도록 콜리전이 없다. */
+	/**
+	 * 영역을 표시하는 평평한 패드. 클릭 트레이스와 바닥 트레이스가 통과하도록 콜리전이 없다.
+	 *
+	 * ArtMesh가 채워져 있으면 이 컴포넌트가 그 메시를 그린다. 컴포넌트를 따로 두지 않는
+	 * 이유는 패드에 남겨 둘 것이 없기 때문이다 -- 블록의 프록시 큐브와 달리 여기에는
+	 * 커서가 잡을 콜리전이 애초에 없다.
+	 */
 	UPROPERTY(VisibleAnywhere, Category = "Floor Tile")
 	TObjectPtr<UStaticMeshComponent> PadMesh;
 
@@ -137,4 +179,12 @@ protected:
 	FVector PivotWorld = FVector::ZeroVector;
 
 	bool bDisabled = false;
+
+private:
+	/** 아트 메시를 영역 크기에 맞춰 패드에 적용한다. RefreshVisual에서만 부른다. */
+	void ApplyArtVisual(double CellSize);
+
+	/** 생성자가 잡아 둔 그레이박스 큐브. ArtMesh를 비우면 여기로 되돌아간다. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> GreyBoxMesh;
 };

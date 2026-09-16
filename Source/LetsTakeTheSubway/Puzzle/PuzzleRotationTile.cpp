@@ -18,6 +18,24 @@
 
 APuzzleRotationTile::APuzzleRotationTile()
 {
+	// 회전판의 아트. 메시는 400 cm(4셀)로 만들어져 있어 기본 4x4에서 배율이 1이 된다.
+	// 두께가 5 cm뿐이라 Z는 그레이박스 패드와 같은 5 cm에 띄운다 -- 에디터 그리드 오버레이
+	// (바닥에서 2 cm)와 같은 평면을 피하기 위해서다.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlateFinder(
+		TEXT("/Game/Art/JW_asset/SM_EV_PLATE001.SM_EV_PLATE001"));
+	if (PlateFinder.Succeeded())
+	{
+		ArtMesh = PlateFinder.Object;
+		ArtMeshOffset = FTransform(FVector(0.0, 0.0, 5.0));
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PlateMaterialFinder(
+		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_F0.MI_GreyBox_F0"));
+	if (PlateMaterialFinder.Succeeded())
+	{
+		ArtMaterial = PlateMaterialFinder.Object;
+	}
+
 	/*CornerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CornerMesh"));
 	CornerMesh->SetupAttachment(SceneRoot);
 	CornerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);

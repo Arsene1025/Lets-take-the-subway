@@ -10,6 +10,7 @@
 #include "Sound/GameSoundSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
@@ -21,14 +22,29 @@ APuzzleElevatorDock::APuzzleElevatorDock()
 	// 인정되어 "정확한 자리에 가져다 놓는다"는 퍼즐이 사라진다.
 	SizeInCells = 4;
 
+	// 구조물의 아트. 회전판과 같은 400 cm 판이라 4x4에서 배율이 1이 된다. 피벗이 메시
+	// 한가운데(Z -19.8 ~ +21.6)라 바닥에 맞추려면 그만큼 올려야 한다.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaceFinder(
+		TEXT("/Game/Art/JW_asset/elevator/SM_ElevatorPlace_001.SM_ElevatorPlace_001"));
+	if (PlaceFinder.Succeeded())
+	{
+		ArtMesh = PlaceFinder.Object;
+		ArtMeshOffset = FTransform(FVector(0.0, 0.0, 20.0));
+	}
+
+	// Idle이 곧 아트 머티리얼이다. 둘이 어긋나면 엘리베이터가 떠난 뒤 판 색이 돌아오지 않는다.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> IdleFinder(
-		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_B2.MI_GreyBox_B2"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ReadyFinder(
 		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_F0.MI_GreyBox_F0"));
+
+	// 차체가 올라와 있는 동안만 다른 색이 된다. "여기 올려놓으면 된다"와 "이제 탈 수 있다"를
+	// 가르는 유일한 신호이므로 아트 메시로 바뀐 뒤에도 남겨 둔다.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ReadyFinder(
+		TEXT("/Game/Art/GreyBox/Materials/MI_GreyBox_Movable.MI_GreyBox_Movable"));
 
 	if (IdleFinder.Succeeded())
 	{
 		IdleMaterial = IdleFinder.Object;
+		ArtMaterial = IdleFinder.Object;
 		if (PadMesh)
 		{
 			PadMesh->SetMaterial(0, IdleFinder.Object);
