@@ -43,7 +43,10 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UUserWidget> AlertUIWidget;
 
-    /** 바인딩한 스테이지 서브시스템. 레벨과 함께 사라지므로 약참조로 든다. */
+    UPROPERTY(Transient)
+    TObjectPtr<UUserWidget> CutsceneWidget;
+
+    /** 바인딩한 스테이지 서브시스템. 레벨과 함께 사라지므로 약참조로 든다.   */
     TWeakObjectPtr<UStageSubsystem> BoundStage;
 
     /** 마지막으로 PathUI에 넘긴 그림 번호. 같은 번호를 다시 그리지 않는다. -1이면 아직 없음. */
@@ -97,6 +100,9 @@ public:
     UFUNCTION()
     void ShowAlertUI(FText message);
 
+    UFUNCTION()
+    void PlayCutscene(int32 cutscene);
+
 #pragma endregion
 
 
@@ -119,6 +125,10 @@ public:
     /** 입력을 막는 UI가 하나라도 열려 있는지. */
     UFUNCTION(BlueprintPure, Category = "UI")
     bool IsUIOpen() const { return OpenUICount > 0; }
+
+
+    UFUNCTION(BlueprintCallable, Category = "CutScene")
+    void EndCutscene();
 
 #pragma endregion
 
