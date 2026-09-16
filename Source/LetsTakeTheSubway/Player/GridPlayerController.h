@@ -296,6 +296,20 @@ private:
 	/** 마지막으로 카메라를 맞춘 구역. INDEX_NONE이면 아직 레벨 시작 판정 전이다. */
 	int32 AppliedZoneIndex = INDEX_NONE;
 
+	/**
+	 * 입력을 막는 UI가 열렸다(UUIManagerSubsystem::OnUIOpened, 2026-09-16). 입력 모드는 UI 매니저가 바꾸고,
+	 * 여기서는 누르고 있던 이동키·드래그·누름 판정·호버를 정리한다.
+	 */
+	UFUNCTION()
+	void HandleUIOpened();
+
+	/** 입력을 막는 UI가 닫혔다. 열린 UI가 더 없으면 입력을 다시 받는다. */
+	UFUNCTION()
+	void HandleUIClosed();
+
+	/** 입력을 막는 UI가 열려 있는 동안 true. 클릭·이동키·드래그·호버를 무시한다. */
+	bool bUIBlocksInput = false;
+
 	void OnPressed();
 	void OnReleased();
 

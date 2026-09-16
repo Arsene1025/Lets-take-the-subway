@@ -1032,3 +1032,30 @@ void AGridActor::BakeOverridesFromMarkers()
 }
 
 #endif	// WITH_EDITOR
+
+// ---------------------------------------------------------------------------- 콘솔
+
+// 디테일 패널의 Generate Grid 버튼과 같다(2026-09-16). 에디터 콘솔에서 치면 열려 있는 레벨의 그리드를
+// 전부 다시 생성한다. 자동화 도구가 CallInEditor 버튼을 누를 수 없어서 만들었다. 생성 뒤 레벨을 저장해야 남는다.
+static void GenerateGridCommand(const TArray<FString>& Args, UWorld* World)
+{
+	if (!World)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.GenerateGrid: no world."));
+		return;
+	}
+
+	int32 Count = 0;
+	for (TActorIterator<AGridActor> It(World); It; ++It)
+	{
+		It->GenerateGrid();
+		++Count;
+	}
+
+	UE_LOG(LogLTTSGrid, Display, TEXT("ltts.GenerateGrid: regenerated %d grid(s) in %s."), Count, *World->GetMapName());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GGenerateGridCommand(
+	TEXT("ltts.GenerateGrid"),
+	TEXT("Regenerate every AGridActor in the current world, same as the Generate Grid button. Save the level afterwards."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&GenerateGridCommand));

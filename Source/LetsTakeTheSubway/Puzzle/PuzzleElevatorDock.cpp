@@ -8,10 +8,14 @@
 #include "Puzzle/PuzzleElevatorBlock.h"
 #include "Puzzle/PuzzleSubsystem.h"
 #include "Sound/GameSoundSubsystem.h"
+#include "UI/Guide/GuideDataSubsystem.h"
+#include "UI/UIManagerSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
@@ -583,6 +587,15 @@ bool APuzzleElevatorDock::TryLaunch(AGridPawn* Pawn, FText* OutReason)
 			return false;
 		}
 
+		// 엔딩 승강기에 탄 순간 PathUI를 마지막 그림으로 바꾼다(2026-09-16, Stage1 = 4).
+		if (ClearPathUIIndex >= 0)
+		{
+			if (UUIManagerSubsystem* UI = UUIManagerSubsystem::Get(this))
+			{
+				UI->ShowOrRefreshPathUI(ClearPathUIIndex);
+			}
+		}
+
 		return true;
 	}
 
@@ -611,6 +624,13 @@ bool APuzzleElevatorDock::TryLaunch(AGridPawn* Pawn, FText* OutReason)
 		return false;
 	}
 
+	// 도착 가이드(2026-09-16). 어느 쪽에도 가이드가 없으면 바인딩하지 않는다.
+	const APuzzleElevatorDock* Partner = GetTargetDock();
+	if (ArrivalGuide != EGuideType::None || (Partner && Partner->ArrivalGuide != EGuideType::None))
+	{
+		Elevator->OnArrived.AddUniqueDynamic(this, &APuzzleElevatorDock::HandleArrived);
+	}
+
 	return true;
 }
 
@@ -630,6 +650,43 @@ void APuzzleElevatorDock::HandleStageClear(APawn* Pawn, FIntPoint Cell)
 	UE_LOG(LogLTTSGrid, Display,
 		TEXT("%s: stage cleared at cell (%d,%d); this dock is now the way out."),
 		*GetName(), Cell.X, Cell.Y);
+}
+
+void APuzzleElevatorDock::HandleArrived(APuzzleElevatorBlock* Elevator, APawn* Pawn)
+{
+	if (!Elevator)
+	{
+		return;
+	}
+
+	Elevator->OnArrived.RemoveDynamic(this, &APuzzleElevatorDock::HandleArrived);
+
+	// 승객이 사라지는 등 중간에 끝난 이동이면 폰이 없다. 플레이어가 실제로 내렸을 때만 띄운다.
+	if (!Cast<AGridPawn>(Pawn))
+	{
+		return;
+	}
+
+	// 차체가 멈춘 층의 구조물을 고른다. FullyContains는 층(Z)까지 보므로 출발 구조물은 걸리지 않는다.
+	APuzzleElevatorDock* Arrival = nullptr;
+	if (FullyContains(*Elevator))
+	{
+		Arrival = this;
+	}
+	else if (APuzzleElevatorDock* Partner = GetTargetDock(); Partner && Partner->FullyContains(*Elevator))
+	{
+		Arrival = Partner;
+	}
+
+	if (!Arrival || Arrival->ArrivalGuide == EGuideType::None)
+	{
+		return;
+	}
+
+	if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+	{
+		Guide->RequestGuide(Arrival->ArrivalGuide);
+	}
 }
 
 void APuzzleElevatorDock::HandleHoldReached(APuzzleElevatorBlock* Elevator, APawn* Pawn)
@@ -654,6 +711,32 @@ void APuzzleElevatorDock::HandleHoldReached(APuzzleElevatorBlock* Elevator, APaw
 
 	OnStageClearCutscene(Elevator, Pawn);
 	OnClearCutscene.Broadcast(this, Elevator, Pawn);
+
+	// 다음 레벨(2026-09-16). 연출이 이미 레벨을 열었다면 월드가 사라지며 타이머도 함께 사라진다.
+	if (!ClearNextLevel.IsNull())
+	{
+		UE_LOG(LogLTTSGrid, Display, TEXT("%s: opening %s in %.1f s."),
+			*GetName(), *ClearNextLevel.ToSoftObjectPath().ToString(), ClearNextLevelDelay);
+
+		if (ClearNextLevelDelay <= 0.0f)
+		{
+			OpenClearNextLevel();
+		}
+		else
+		{
+			GetWorldTimerManager().SetTimer(ClearNextLevelTimer, this, &APuzzleElevatorDock::OpenClearNextLevel, ClearNextLevelDelay, false);
+		}
+	}
+}
+
+void APuzzleElevatorDock::OpenClearNextLevel()
+{
+	if (ClearNextLevel.IsNull())
+	{
+		return;
+	}
+
+	UGameplayStatics::OpenLevelBySoftObjectPtr(this, ClearNextLevel);
 }
 
 void APuzzleElevatorDock::OnStageClearCutscene_Implementation(APuzzleElevatorBlock* Elevator, APawn* Rider)
@@ -671,6 +754,8 @@ void APuzzleElevatorDock::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		CurrentGrid->OnStageClear.RemoveDynamic(this, &APuzzleElevatorDock::HandleStageClear);
 	}
+
+	GetWorldTimerManager().ClearTimer(ClearNextLevelTimer);
 
 	Super::EndPlay(EndPlayReason);
 }

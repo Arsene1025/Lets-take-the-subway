@@ -13,6 +13,7 @@
 #include "Vehicle/VehicleSeat.h"
 #include "Puzzle/PuzzleSubsystem.h"
 #include "Sound/GameSoundSubsystem.h"
+#include "UI/Guide/GuideDataSubsystem.h"
 
 #include "Animation/AnimSequenceBase.h"
 #include "Components/AudioComponent.h"
@@ -1051,6 +1052,7 @@ void AGridTrain::EnterDoorsOpen()
 		Pawn->WalkOntoGrid(ExitWorld);
 		Rider.Reset();
 		UnloadedPawn = Pawn;
+		UnloadedGuide = Stop.GuideOnFirstMoveAfterExit;
 	}
 }
 
@@ -1090,8 +1092,18 @@ void AGridTrain::Tick(float DeltaSeconds)
 				Unloaded->RequestMoveToCell(UnloadedGoalCell);
 			}
 
+			// 이 역의 "내린 뒤 첫 이동" 가이드를 걸어 둔다. 위의 자동 걸음은 입력이 아니므로 세지 않는다.
+			if (UnloadedGuide != EGuideType::None)
+			{
+				if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+				{
+					Guide->ArmGuideOnNextMoveInput(UnloadedGuide);
+				}
+			}
+
 			UnloadedPawn.Reset();
 			UnloadedGoalCell = FIntPoint(-1, -1);
+			UnloadedGuide = EGuideType::None;
 		}
 	}
 

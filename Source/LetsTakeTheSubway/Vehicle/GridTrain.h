@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Sound/SoundKeys.h"
+#include "UI/Guide/GuideType.h"
 #include "GridTrain.generated.h"
 
 class AGridActor;
@@ -93,6 +94,13 @@ struct FGridTrainStop
 	 */
 	UPROPERTY(EditAnywhere, Category = "Train Stop|Sound")
 	bool bArrivalSounds = true;
+
+	/**
+	 * 플레이어가 이 역에서 내린 뒤 처음으로 이동 입력(이동키, 바닥 클릭)을 했을 때 요청할 가이드 팝업.
+	 * None이면 없음(2026-09-16). 내린 뒤 PostExitCell까지 열차가 시키는 자동 걸음은 입력이 아니다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Train Stop|UI")
+	EGuideType GuideOnFirstMoveAfterExit = EGuideType::None;
 };
 
 /**
@@ -594,6 +602,9 @@ private:
 
 	/** 방금 내린 폰이 그리드에 다시 선 뒤 걸어갈 셀. 없으면 (-1,-1). */
 	FIntPoint UnloadedGoalCell = FIntPoint(-1, -1);
+
+	/** 방금 내린 역의 GuideOnFirstMoveAfterExit. 폰이 그리드에 다시 서면 가이드 서브시스템에 걸어 둔다. */
+	EGuideType UnloadedGuide = EGuideType::None;
 
 	/**
 	 * ArtMesh에 마지막으로 지정한 애니메이션.

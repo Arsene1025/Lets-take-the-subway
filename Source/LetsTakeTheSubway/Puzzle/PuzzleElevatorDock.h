@@ -6,6 +6,7 @@
 #include "Grid/GridTypes.h"
 #include "Puzzle/PuzzleFloorTile.h"
 #include "Sound/SoundKeys.h"
+#include "UI/Guide/GuideType.h"
 #include "PuzzleElevatorDock.generated.h"
 
 class AGridPawn;
@@ -129,6 +130,19 @@ public:
 	FName ClearSoundKey = LTTSSoundKeys::StageClear;
 
 	/**
+	 * 엔딩 승강기가 멈춰 선 뒤 열 레벨(2026-09-16). 비워 두면 레벨을 바꾸지 않는다.
+	 *
+	 * 튜토리얼 → Subway_Stage1처럼 다음 스테이지로 넘어갈 때 쓴다. 연출(OnStageClearCutscene)이 따로
+	 * 레벨을 연다면 비워 둔다. 둘 다 열면 먼저 연 쪽이 이긴다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Elevator Dock|Stage Clear")
+	TSoftObjectPtr<UWorld> ClearNextLevel;
+
+	/** 엔딩 승강기가 멈춰 선 뒤 ClearNextLevel을 열기까지 기다리는 시간(초). 0이면 곧바로 연다. */
+	UPROPERTY(EditAnywhere, Category = "Elevator Dock|Stage Clear", meta = (ClampMin = 0.0, Units = "s"))
+	float ClearNextLevelDelay = 2.0f;
+
+	/**
 	 * 엔딩 승강기가 멈춰 섰다. 페이드·시퀀스·씬 전환을 여기에 구현한다.
 	 *
 	 * 네이티브 기본 구현은 로그만 남긴다. 열차의 문 연출 훅과 같은 규칙이다: 규칙은 C++가
@@ -148,6 +162,24 @@ public:
 	 */
 	UPROPERTY(BlueprintAssignable, Category = "Elevator Dock|Stage Clear")
 	FOnDockClearCutscene OnClearCutscene;
+
+	// ---------------------------------------------------------------- UI (2026-09-16)
+
+	/**
+	 * 엔딩 승강기에 타는 순간 PathUI에 넘길 그림 번호. -1이면 PathUI를 건드리지 않는다.
+	 *
+	 * Stage1은 4다(구역 1~4는 AStageInfo::ZonePathUIIndices의 0~3). 승강이 시작되는 순간이지
+	 * 연출이 시작되는 순간(OnStageClearCutscene)이 아니다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Elevator Dock|UI", meta = (ClampMin = -1))
+	int32 ClearPathUIIndex = -1;
+
+	/**
+	 * 다른 층에서 출발한 차체가 이 구조물 층에 도착해 플레이어가 내렸을 때 요청할 가이드 팝업.
+	 * None이면 없음. Stage1의 지하철 승강장 쪽 구조물에 [지하철 탑승](Stage1_2)을 적는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Elevator Dock|UI")
+	EGuideType ArrivalGuide = EGuideType::None;
 
 	// ---------------------------------------------------------------- 구버전 저작
 	//
@@ -278,6 +310,13 @@ private:
 	UFUNCTION()
 	void HandleHoldReached(APuzzleElevatorBlock* Elevator, APawn* Pawn);
 
+	/**
+	 * 이 구조물에서 출발한 층간 이동이 끝났다. 차체가 멈춘 층의 구조물(나 또는 짝)에 ArrivalGuide가
+	 * 있으면 요청한다. 한 번 받으면 바인딩을 푼다.
+	 */
+	UFUNCTION()
+	void HandleArrived(APuzzleElevatorBlock* Elevator, APawn* Pawn);
+
 	/** bClearOnStageClear일 때 그리드의 StageClear 셀 이벤트를 받는다. */
 	UFUNCTION()
 	void HandleStageClear(APawn* Pawn, FIntPoint Cell);
@@ -294,6 +333,12 @@ private:
 	mutable bool bReverseTargetResolved = false;
 
 	bool bPairingLogged = false;
+
+	/** ClearNextLevel을 열 타이머. */
+	FTimerHandle ClearNextLevelTimer;
+
+	/** ClearNextLevel을 연다. */
+	void OpenClearNextLevel();
 
 	/** 연출은 한 번뿐이다. 같은 차체를 다시 태워도 두 번 부르지 않는다. */
 	bool bClearCutsceneFired = false;
