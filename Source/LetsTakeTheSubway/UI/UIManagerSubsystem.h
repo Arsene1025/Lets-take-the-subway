@@ -46,7 +46,7 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UUserWidget> CutsceneWidget;
 
-    /** 바인딩한 스테이지 서브시스템. 레벨과 함께 사라지므로 약참조로 든다. */
+    /** 바인딩한 스테이지 서브시스템. 레벨과 함께 사라지므로 약참조로 든다.   */
     TWeakObjectPtr<UStageSubsystem> BoundStage;
 
     /** 마지막으로 PathUI에 넘긴 그림 번호. 같은 번호를 다시 그리지 않는다. -1이면 아직 없음. */
