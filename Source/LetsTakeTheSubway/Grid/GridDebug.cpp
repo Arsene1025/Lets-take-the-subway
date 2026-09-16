@@ -8,10 +8,13 @@
 
 TAutoConsoleVariable<int32> CVarGridDebug(
 	TEXT("ltts.GridDebug"),
-	1,
+	// --- GRID HUD DEFAULT OFF 2026-09-16 ---
+	// 그리드 디버그 HUD를 쓰지 않아 기본으로 끈다. 필요하면 콘솔에서 ltts.GridDebug 1로 켠다.
+	// 1,
+	0,
 	TEXT("Grid movement debug display.\n")
-	TEXT("  0: off\n")
-	TEXT("  1: HUD text only (default)\n")
+	TEXT("  0: off (default)\n")
+	TEXT("  1: HUD text only\n")
 	TEXT("  2: HUD text plus in-world path and hovered cell"),
 	ECVF_Default);
 
