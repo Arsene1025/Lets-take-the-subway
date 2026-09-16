@@ -160,6 +160,20 @@ bool UPuzzleSubsystem::IsDockCell(FIntPoint Cell) const
 	return false;
 }
 
+APuzzleFloorTile* UPuzzleSubsystem::FindTileContaining(const APuzzleBlock& Block) const
+{
+	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
+	{
+		APuzzleFloorTile* Tile = Entry.Get();
+		if (Tile && Tile->FullyContains(Block))
+		{
+			return Tile;
+		}
+	}
+
+	return nullptr;
+}
+
 APuzzleElevatorDock* UPuzzleSubsystem::FindDockUnder(const APuzzleElevatorBlock& Elevator) const
 {
 	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
@@ -374,17 +388,10 @@ void UPuzzleSubsystem::NotifyBlockCameToRest(APuzzleBlock* Block)
 		return;
 	}
 
-	for (const TWeakObjectPtr<APuzzleFloorTile>& Entry : Tiles)
+	// 타일은 절대 겹치지 않으므로 블록을 담는 타일은 많아야 하나다. 무엇을 할지는 타일이
+	// 정한다: 회전판은 공간을 돌리고, 구조물은 엘리베이터를 받는다.
+	if (APuzzleFloorTile* Tile = FindTileContaining(*Block))
 	{
-		APuzzleFloorTile* Tile = Entry.Get();
-		if (!Tile || !Tile->FullyContains(*Block))
-		{
-			continue;
-		}
-
-		// 타일은 절대 겹치지 않으므로 블록을 담는 타일은 많아야 하나다. 첫 번째에서 멈춘다.
-		// 무엇을 할지는 타일이 정한다: 회전판은 공간을 돌리고, 구조물은 엘리베이터를 받는다.
 		Tile->OnBlockCameToRest(*Block);
-		return;
 	}
 }

@@ -6,7 +6,9 @@
 #include "Art/ArtMaterialUtil.h"
 #include "Grid/GridActor.h"
 #include "Player/GridPawn.h"
+#include "Puzzle/PuzzleFloorTile.h"
 #include "Puzzle/PuzzleRegion.h"
+#include "Puzzle/PuzzleRotationTile.h"
 #include "Puzzle/PuzzleSubsystem.h"
 #include "Sound/GameSoundSubsystem.h"
 
@@ -549,9 +551,17 @@ void APuzzleBlock::SetHeld(bool bInHeld)
 	// 안 되고, 놓은 블록은 지금 향하던 칸에서 서야 한다.
 	HeldSlideDir.Reset();
 
+	// 타일에 걸린 상태도 드래그 한 번의 일이다. 놓으면 풀리고, 다시 잡으면 그 자리에서
+	// 새로 센다 -- 그래서 걸린 조각을 한 번 더 끌면 타일 밖으로 나갈 수 있다.
+	bParkedOnTile = false;
+
 	if (bHeld)
 	{
 		StepsWhileHeld = 0;
+
+		// 이미 타일 위에서 시작했다면 그 타일에는 걸리지 않는다. 들어서는 순간만 잡는다.
+		const UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+		LastTileUnder = Subsystem ? Subsystem->FindTileContaining(*this) : nullptr;
 		return;
 	}
 
@@ -581,6 +591,44 @@ void APuzzleBlock::ReportAtRest()
 	{
 		Subsystem->NotifyBlockCameToRest(this);
 	}
+}
+
+bool APuzzleBlock::CheckParkOnTile()
+{
+	UPuzzleSubsystem* Subsystem = UPuzzleSubsystem::Get(this);
+	if (!Subsystem)
+	{
+		return false;
+	}
+
+	APuzzleFloorTile* Tile = Subsystem->FindTileContaining(*this);
+	const bool bEntered = Tile && Tile != LastTileUnder.Get();
+
+	// null도 기록한다. 그래야 타일을 빠져나갔다가 같은 타일로 돌아올 때 다시 걸린다.
+	LastTileUnder = Tile;
+
+	if (!bEntered)
+	{
+		return false;
+	}
+
+	bParkedOnTile = true;
+	HeldSlideDir.Reset();
+
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: lined up with %s at cell (%d,%d); parked until the drag is released."),
+		*GetName(), *Tile->GetName(), GetRect().Min.X, GetRect().Min.Y);
+
+	// 구조물은 도킹하면서 자기 안내("The elevator is in place.")를 띄우므로 겹쳐 말하지
+	// 않는다. 회전판은 놓아야 돌기 시작하니 그 사실을 여기서 알려 준다.
+	if (Tile->IsA<APuzzleRotationTile>())
+	{
+		Subsystem->ShowFeedback(
+			TEXT("Lined up with the turntable. Release to turn, or drag again to move on."),
+			FLinearColor(0.45f, 0.85f, 1.0f));
+	}
+
+	return true;
 }
 
 void APuzzleBlock::BeginRotation(const FVector& Pivot, int32 TurnSign, float Duration, const FGridRect& NewRect)
@@ -673,6 +721,14 @@ void APuzzleBlock::Tick(float DeltaSeconds)
 			SetActorLocation(SlideTarget);
 			Budget -= Remaining;
 			AnimState = EAnimState::Idle;
+
+			// 이 칸에서 바닥 타일에 딱 들어맞았으면 여기서 선다. 다음 칸을 이어 붙이기
+			// **전에** 봐야 한다 -- 이 루프는 한 프레임에 여러 칸을 감을 수 있어서, 뒤로
+			// 미루면 걸려야 할 자리를 그대로 지나친다.
+			if (bHeld && bParkOnFloorTile && CheckParkOnTile())
+			{
+				break;
+			}
 
 			// 쥔 손이 여전히 같은 쪽을 가리키고 있으면 곧바로 다음 칸을 시작한다.
 			// StartSlide가 IsAnimating()을 보므로 Idle로 되돌린 뒤에 부른다. 성공할
@@ -852,7 +908,132 @@ namespace
 
 		UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockSlide: no block matching '%s'."), *Args[0]);
 	}
+
+	APuzzleBlock* FindBlockByName(UWorld& World, const FString& Needle)
+	{
+		for (TActorIterator<APuzzleBlock> It(&World); It; ++It)
+		{
+			APuzzleBlock* Block = *It;
+			if (Block
+				&& (Block->GetName().Contains(Needle) || Block->GetActorNameOrLabel().Contains(Needle)))
+			{
+				return Block;
+			}
+		}
+
+		return nullptr;
+	}
+
+	/**
+	 * 쥔 채로 계속 미는 드래그를 흉내 낸다. ltts.BlockSlide가 한 칸만 미는 것과 달리, 여기서는
+	 * 컨트롤러가 커서를 한쪽으로 밀어 둔 상태와 같아져 블록이 막히거나 타일에 걸릴 때까지 간다.
+	 *
+	 * 자동 정지(bParkOnFloorTile)는 드래그 중에만 일어나므로 이 명령 없이는 마우스 없이 확인할
+	 * 방법이 없다. 놓는 것은 ltts.BlockRelease다.
+	 */
+	void BlockDragCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockDrag: run this in play mode."));
+			return;
+		}
+
+		if (Args.Num() < 2)
+		{
+			UE_LOG(LogLTTSGrid, Warning,
+				TEXT("ltts.BlockDrag: usage is ltts.BlockDrag <name substring> <N|E|S|W>"));
+			return;
+		}
+
+		EGridDirection Dir = EGridDirection::North;
+		if (!ParseGridDirection(Args[1], Dir))
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockDrag: '%s' is not N, E, S or W."), *Args[1]);
+			return;
+		}
+
+		APuzzleBlock* Block = FindBlockByName(*World, Args[0]);
+		if (!Block)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockDrag: no block matching '%s'."), *Args[0]);
+			return;
+		}
+
+		// 컨트롤러와 같은 순서로 막는다: 타일에 걸린 조각은 놓기 전에는 더 가지 않는다.
+		// 이 가드가 없으면 명령이 마우스로는 낼 수 없는 움직임을 만들어 낸다.
+		if (Block->IsParkedOnTile())
+		{
+			UE_LOG(LogLTTSGrid, Display,
+				TEXT("ltts.BlockDrag: %s is parked on a floor tile. ltts.BlockRelease first."),
+				*Block->GetActorNameOrLabel());
+			return;
+		}
+
+		Block->SetHeld(true);
+		Block->SetHeldSlideDirection(Dir);
+
+		FText Reason;
+		const bool bAllowed = Block->CanSlide(Dir, &Reason);
+		const bool bMoved = bAllowed && Block->StartSlide(Dir);
+
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("ltts.BlockDrag: %s held, pushing %s -> %s%s"),
+			*Block->GetActorNameOrLabel(),
+			*StaticEnum<EGridDirection>()->GetNameStringByValue(static_cast<int64>(Dir)),
+			bMoved ? TEXT("moving") : TEXT("refused"),
+			bMoved ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *Reason.ToString()));
+	}
+
+	/** 드래그를 놓는다. 마지막 걸음이 끝난 자리에서 타일이 반응할 기회를 얻는다. */
+	void BlockReleaseCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || !World->IsGameWorld())
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockRelease: run this in play mode."));
+			return;
+		}
+
+		int32 Released = 0;
+		for (TActorIterator<APuzzleBlock> It(World); It; ++It)
+		{
+			APuzzleBlock* Block = *It;
+			if (!Block || !Block->IsHeld())
+			{
+				continue;
+			}
+
+			if (Args.Num() > 0
+				&& !Block->GetName().Contains(Args[0])
+				&& !Block->GetActorNameOrLabel().Contains(Args[0]))
+			{
+				continue;
+			}
+
+			UE_LOG(LogLTTSGrid, Display, TEXT("ltts.BlockRelease: %s released at %s."),
+				*Block->GetActorNameOrLabel(), *Block->GetRect().Min.ToString());
+
+			Block->SetHeldSlideDirection(TOptional<EGridDirection>());
+			Block->SetHeld(false);
+			++Released;
+		}
+
+		if (Released == 0)
+		{
+			UE_LOG(LogLTTSGrid, Warning, TEXT("ltts.BlockRelease: nothing is being dragged."));
+		}
+	}
 }
+
+static FAutoConsoleCommandWithWorldAndArgs GBlockDragCommand(
+	TEXT("ltts.BlockDrag"),
+	TEXT("Hold a block and keep pushing it as a drag would: ltts.BlockDrag <name substring> <N|E|S|W>"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&BlockDragCommand));
+
+static FAutoConsoleCommandWithWorldAndArgs GBlockReleaseCommand(
+	TEXT("ltts.BlockRelease"),
+	TEXT("Let go of whatever ltts.BlockDrag is holding: ltts.BlockRelease [name substring]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&BlockReleaseCommand));
 
 static FAutoConsoleCommandWithWorldAndArgs GBlockSlideCommand(
 	TEXT("ltts.BlockSlide"),

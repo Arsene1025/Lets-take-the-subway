@@ -559,13 +559,13 @@ void AGridPlayerController::OnPressed()
 			return;
 		}
 
-		// 드래그가 끝날 때가 아니라 누르는 순간에 거부해서, 플레이어가 제스처를 낭비하기
-		// 전에 걸어오라고 알려 준다.
-		if (!Lever->IsPawnAdjacent(GridPawn))
-		{
-			ShowFeedback(TEXT("Stand next to the lever to work it."), FLinearColor(1.0f, 0.65f, 0.05f));
-			return;
-		}
+		// 레버 옆에 서 있어야 한다는 제약은 걷어냈다. 이제 휠이 보이기만 하면 폰이 어디에
+		// 있든 잡아 돌릴 수 있다. 제약을 되살릴 때를 위해 거부 경로는 남겨 둔다.
+		// if (!Lever->IsPawnAdjacent(GridPawn))
+		// {
+		// 	ShowFeedback(TEXT("Stand next to the lever to work it."), FLinearColor(1.0f, 0.65f, 0.05f));
+		// 	return;
+		// }
 
 		FVector2D ScreenCentre;
 		if (!ProjectWorldLocationToScreen(Lever->GetWheelWorldLocation(), ScreenCentre))
@@ -1290,6 +1290,14 @@ void AGridPlayerController::UpdateDrag()
 		return;
 	}
 
+	// 바닥 타일에 딱 들어맞아 블록이 스스로 멈췄다(bParkOnFloorTile). 위와 같은 규칙으로
+	// 놓았다 다시 잡을 때까지 기다린다 -- 그래야 아래의 StartSlide가 곧바로 다시 밀지 않는다.
+	if (Block->IsParkedOnTile())
+	{
+		Block->SetHeldSlideDirection(TOptional<EGridDirection>());
+		return;
+	}
+
 	if (DragAxis == EPuzzleMoveAxis::None)
 	{
 		return;		// 움직일 수 없는 블록: 뗄 때 왜 안 움직이는지 알려 주려고 쥐고만 있는다
@@ -1568,14 +1576,14 @@ void AGridPlayerController::UpdateHover()
 
 	if (Pick.Kind == FCursorPick::EKind::Lever)
 	{
-		if (const APuzzleLever* Lever = Pick.Lever.Get())
-		{
-			// 레버 자신의 셀이 아니라 레버를 조작할 수 있는 셀들: 손을 뻗기 전에 플레이어가
-			// 알아야 할 단 하나는 어디에 서야 하느냐다.
-			TArray<FIntPoint> Cells;
-			Lever->GetOperatingCells(Cells);
-			FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
-		}
+		// 인접 제약이 사라진 뒤로는 어디에 서야 하는지 알려 줄 필요가 없으므로, 조작 셀
+		// 하이라이트를 그리지 않는다. 제약을 되살린다면 이 그리기도 함께 되살린다.
+		// if (const APuzzleLever* Lever = Pick.Lever.Get())
+		// {
+		// 	TArray<FIntPoint> Cells;
+		// 	Lever->GetOperatingCells(Cells);
+		// 	FGridRuntimeDebugDrawer::DrawHoverCells(GetWorld(), *Grid, Cells, /*bEnterable*/ true);
+		// }
 	}
 	else if (Pick.Kind == FCursorPick::EKind::Vehicle)
 	{

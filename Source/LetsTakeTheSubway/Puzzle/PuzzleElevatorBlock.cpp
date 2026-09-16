@@ -25,6 +25,11 @@ APuzzleElevatorBlock::APuzzleElevatorBlock()
 	MoveAxis = EPuzzleMoveAxis::AxisY;
 	Height = 300.0f;
 
+	// 차체를 구조물·회전판에 정확히 맞추기 어렵다는 피드백에서 나온 기본값(2026-09-16).
+	// 딱 맞는 칸에 닿으면 스스로 서므로 손으로 자리를 더듬을 필요가 없고, 한 번 더 끌면
+	// 그대로 빠져나간다.
+	bParkOnFloorTile = true;
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
 	// 다른 그레이박스 머티리얼을 쓴다. 문은 이 블록이 어느 쪽으로 움직일 수 있는지
