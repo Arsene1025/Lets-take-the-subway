@@ -136,7 +136,7 @@ void UUIManagerSubsystem::ShowGuidePopUpUI(EGuideType guide)
 
         if (W->GetClass()->ImplementsInterface(UUIInitializable::StaticClass()))
         {
-            IUIInitializable::Execute_InitializeInt(W, 0);
+            IUIInitializable::Execute_InitializeGuide(W, guide);
         }
     }
 }
