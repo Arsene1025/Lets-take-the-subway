@@ -65,7 +65,9 @@ AGridPawn::AGridPawn()
 		BodyMesh->SetStaticMesh(SphereFinder.Object);
 	}
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	// 이전: /Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
+		TEXT("/Game/Art/Art_Level/SM_Level/MI_ToonSurface_Player.MI_ToonSurface_Player"));
 	if (MaterialFinder.Succeeded())
 	{
 		BodyMesh->SetMaterial(0, MaterialFinder.Object);

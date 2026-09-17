@@ -200,6 +200,19 @@ public:
 	FTransform ArtMeshOffset = FTransform::Identity;
 
 	/**
+	 * 아트만 키우거나 줄이는 배율. 1이면 아트가 풋프린트와 같은 크기다.
+	 *
+	 * 콜리전 프록시(BodyMesh)·풋프린트·도킹 판정은 그대로 두고, VisualActor(자식 아트 액터)와
+	 * ArtMesh 컴포넌트만 이 배율로 그린다. 블록 원점(풋프린트 중심의 바닥)을 기준으로 줄어들므로
+	 * 바닥에 붙은 채 가운데로 모인다. 엘리베이터가 4x4 판정을 유지한 채 0.9로 그려 이웃 조각과
+	 * 맞닿아 보이지 않게 하는 데 쓴다(2026-09-17, APuzzleElevatorBlock 생성자 기본값).
+	 *
+	 * 그레이박스 큐브는 판정과 같은 상자여야 하므로 이 값을 따르지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Puzzle Block|Art", meta = (ClampMin = 0.01))
+	FVector ArtScale = FVector::OneVector;
+
+	/**
 	 * 아트 메시의 슬롯이 비어 있을 때(엔진 기본 회색 격자) 대신 씌울 머티리얼.
 	 *
 	 * 임포트된 메시는 슬롯이 비면 WorldGridMaterial로 그려진다. 원본 스태틱 메시 액터는
@@ -380,6 +393,12 @@ public:
 protected:
 	/** 몸체의 크기와 색을 다시 맞춘다. 풋프린트나 높이가 바뀔 때마다 호출된다. */
 	virtual void RefreshVisual();
+
+	/**
+	 * RefreshVisual의 아트 부분: VisualActor와 ArtMesh 컴포넌트를 ArtMeshOffset·ArtScale대로 맞춘다.
+	 * Super::RefreshVisual을 부르지 않는 오버라이드(APuzzleRotatingPillar)는 이것을 대신 부른다.
+	 */
+	void RefreshArtVisual();
 
 	/** 아트(자식 액터든 스태틱 메시든)가 붙어 있으면 true. 파생 클래스가 자기 그레이박스 장식을 숨길 때 쓴다. */
 	bool IsUsingArtVisual() const { return VisualActorClass != nullptr || ArtMesh != nullptr; }
