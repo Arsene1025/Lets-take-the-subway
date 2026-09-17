@@ -383,6 +383,7 @@ MainUI 플레이 버튼은 임시로 Stage1을 열되, 나중에 바꾸기 쉽�
 ### 8.3 확인
 - 빌드 성공, 경고 0. 에디터 재시작 뒤 `PlayLevelName` 기본값과 시작 버튼 그래프가 유지되는 것을 확인했다.
 - 입력 차단은 PIE에서 확인하지 못했다. 게임 안에서 `ShowSideMenuUI`를 부르는 곳이 아직 없어 사이드 메뉴를 열 방법이 없다.
+  → 2026-09-17에 ESC 토글을 붙였다(11절).
 
 ### 8.4 발견한 문제 (UI 담당 확인 필요)
 - `WBP_PathUI`의 `InitializeInt`에서 Switch On Int의 **0번 핀이 비어 있고 Default 핀에 point1_1이 연결**돼 있다.
@@ -456,3 +457,28 @@ MainUI 플레이 버튼은 임시로 Stage1을 열되, 나중에 바꾸기 쉽�
 - 위치 기록: 13042(정차·문 열림) → 20042(화면 밖) → 역재생으로 13042 복귀 → 문 열림부터 다시. 약 34초 동안 두 바퀴 반복.
 - 캡처: 정차 중 문 열림, 출발, 빈 선로(화면 밖), 복귀 중 모두 확인. 블루프린트 열차가 정적 열차와 같은 자리·크기로 보인다.
 - 확인 안 함: Jimin 레벨 PIE(옵션 기본값이 false라 그래프상 기존 흐름과 같다), 복귀 때 바퀴가 반대로 도는지 눈으로 확인.
+
+## 11. ESC로 사이드 메뉴 토글 (2026-09-17)
+
+사용자 요청: `WBP_SideMenuUI`를 ESC로 열고 닫을 수 있게.
+
+### 11.1 왜 입력 액션이 아니라 슬레이트 전처리기인가
+- 사이드 메뉴가 열리면 `CallUIOpened`가 입력 모드를 `FInputModeUIOnly`로 바꾼다. 이 모드는 게임 뷰포트의 입력을 통째로
+  무시하므로(`SetIgnoreInput(true)`) `AGridPlayerController`의 Enhanced Input 액션은 **닫는 ESC를 받지 못한다**.
+- 위젯 쪽 `OnKeyDown`은 위젯에 포커스가 있어야 하고 블루프린트를 고쳐야 한다.
+- 그래서 `UUIManagerSubsystem`이 `IInputProcessor`(`FSideMenuEscapeProcessor`, cpp 내부 클래스)를 `FSlateApplication`에
+  등록한다. 전처리기는 포커스·입력 모드와 무관하게 키를 가장 먼저 받고, `true`를 돌려주면 위젯·에디터로 전달되지 않는다.
+  `Initialize`에서 등록, `Deinitialize`에서 해제(슬레이트가 없는 커맨드렛·전용 서버는 건너뛴다).
+
+### 11.2 동작 (`HandleEscapeKey`)
+- 받지 않는 경우(키는 원래대로 흘러간다): 게임 월드가 아님, 플레이어 컨트롤러가 `AGridPlayerController`가 아님(타이틀),
+  컷씬 위젯이 떠 있음, 에디터에서 PIE 뷰포트(또는 그 위 위젯)에 포커스가 없음.
+- 받는 경우: `ToggleSideMenuUI` → 열려 있으면 `HideSideMenuUI`(위젯 `Collapsed` + `CallUIClosed`, 닫기 버튼과 같은 순서),
+  접혀 있으면 `ShowSideMenuUI`(기존 경로: `Visible` + `Initialize` → 위젯의 `EventInitialize`가 `CallUIOpened`).
+- 새 API: `ShowSideMenuUI`가 BlueprintCallable이 됐고 `HideSideMenuUI`·`ToggleSideMenuUI`(BlueprintCallable),
+  `IsSideMenuOpen`(BlueprintPure)을 추가했다. 위젯 블루프린트는 고치지 않았다.
+
+### 11.3 주의
+- PIE 뷰포트에 포커스가 있을 때 ESC는 이제 사이드 메뉴 토글이다. PIE를 멈추려면 툴바 Stop 버튼을 쓰거나 다른 패널을 클릭한
+  뒤 ESC를 누른다.
+- 사이드 메뉴 안의 설정·가이드 패널 상태는 토글로 초기화되지 않는다(닫기 버튼과 같다).

@@ -163,18 +163,9 @@ void APuzzleRotatingPillar::RefreshVisual()
 {
 	// 일부러 부모를 부르지 않는다: 부모는 홈 둘레 슬랩 네 장을 배치한다.
 	//
-	// 부모의 아트 처리(ArtMesh 컴포넌트 갱신)는 여기서 직접 한다. 부모의 RefreshVisual을
-	// 통째로 부를 수 없어서다.
-	if (ArtMeshComponent)
-	{
-		if (ArtMeshComponent->GetStaticMesh() != ArtMesh)
-		{
-			ArtMeshComponent->SetStaticMesh(ArtMesh);
-		}
-		ArtMeshComponent->SetRelativeTransform(ArtMeshOffset);
-		ArtMeshComponent->SetVisibility(ArtMesh != nullptr);
-		LTTSArt::ReplaceDefaultMaterials(*ArtMeshComponent, ArtFallbackMaterial);
-	}
+	// 부모의 아트 처리(VisualActor·ArtMesh 컴포넌트 갱신, ArtScale)는 부모의 RefreshVisual을
+	// 통째로 부를 수 없어 아트 부분만 따로 부른다.
+	RefreshArtVisual();
 
 	// 아트가 붙으면 그레이박스 원기둥은 숨긴다. 콜리전은 남긴다 -- 커서가 잡는 것은 언제나
 	// 셀 하나 크기의 이 프록시이지 아트 기둥의 실루엣이 아니다.

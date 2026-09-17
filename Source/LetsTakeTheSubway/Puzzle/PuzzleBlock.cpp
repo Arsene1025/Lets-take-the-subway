@@ -206,9 +206,11 @@ void APuzzleBlock::SanitiseVisualActor()
 	}
 }
 
-void APuzzleBlock::RefreshVisual()
+void APuzzleBlock::RefreshArtVisual()
 {
-	const bool bArt = IsUsingArtVisual();
+	// ArtScale은 블록 원점(풋프린트 중심의 바닥)을 기준으로 아트만 줄인다. 콜리전 프록시
+	// BodyMesh는 RefreshVisual에서 풋프린트 그대로 맞추므로 판정은 변하지 않는다.
+	const FTransform ScaleAboutOrigin(FQuat::Identity, FVector::ZeroVector, ArtScale);
 
 	if (VisualActor)
 	{
@@ -217,8 +219,8 @@ void APuzzleBlock::RefreshVisual()
 			VisualActor->SetChildActorClass(VisualActorClass);
 		}
 
-		// 아트 원점은 풋프린트 중심의 바닥이다. 액터 원점과 같은 규약이라 보정이 없다.
-		VisualActor->SetRelativeLocation(FVector::ZeroVector);
+		// 아트 원점은 풋프린트 중심의 바닥이다. 액터 원점과 같은 규약이라 위치 보정이 없다.
+		VisualActor->SetRelativeTransform(ScaleAboutOrigin);
 		SanitiseVisualActor();
 	}
 
@@ -230,10 +232,18 @@ void APuzzleBlock::RefreshVisual()
 		}
 
 		// 아트 원점은 풋프린트 중심의 바닥이다. 보정이 필요한 메시만 ArtMeshOffset을 쓴다.
-		ArtMeshComponent->SetRelativeTransform(ArtMeshOffset);
+		// 보정을 먼저 적용하고 그 결과를 원점 기준으로 줄인다(오프셋 위치도 함께 줄어든다).
+		ArtMeshComponent->SetRelativeTransform(ArtMeshOffset * ScaleAboutOrigin);
 		ArtMeshComponent->SetVisibility(ArtMesh != nullptr);
 		LTTSArt::ReplaceDefaultMaterials(*ArtMeshComponent, ArtFallbackMaterial);
 	}
+}
+
+void APuzzleBlock::RefreshVisual()
+{
+	const bool bArt = IsUsingArtVisual();
+
+	RefreshArtVisual();
 
 	if (!BodyMesh)
 	{
