@@ -4,6 +4,7 @@
 #include "UIManagerSubsystem.h"
 #include "UISettings.h"
 #include "UIInitializable.h"
+#include "CutScene/CutSceneWidget.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/GameInstance.h"
 #include "Sound/GameSoundSubsystem.h"
@@ -17,6 +18,8 @@
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 #include "Player/GridPlayerController.h"
+#include "HAL/IConsoleManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Widgets/SViewport.h"
 
@@ -58,6 +61,54 @@ namespace
     private:
         TWeakObjectPtr<UUIManagerSubsystem> Owner;
     };
+
+    /**
+     * [2026/09/17] 콘솔 ltts.Cutscene <Intro|Ending> [레벨 경로]
+     *
+     * 어느 레벨에서든 컷씬을 띄워 본다. 레벨 경로(/Game/Maps/Main/Subway_Title)를 주면 끝난 뒤 그 레벨을 연다.
+     * 인자가 없으면 재생 중인 컷씬을 끝낸다.
+     */
+    static FAutoConsoleCommandWithWorldAndArgs GCutsceneCommand(
+        TEXT("ltts.Cutscene"),
+        TEXT("ltts.Cutscene <Intro|Ending> [/Game/Maps/Main/Level] : play a picture cutscene, then open the level. No args: end the current cutscene."),
+        FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+        {
+            UUIManagerSubsystem* UI = UUIManagerSubsystem::Get(World);
+            if (!UI)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ltts.Cutscene: no UI manager (not a game world?)."));
+                return;
+            }
+
+            if (Args.IsEmpty())
+            {
+                UI->EndCutscene();
+                return;
+            }
+
+            ECutsceneKind Kind;
+            if (Args[0].Equals(TEXT("Intro"), ESearchCase::IgnoreCase))
+            {
+                Kind = ECutsceneKind::Intro;
+            }
+            else if (Args[0].Equals(TEXT("Ending"), ESearchCase::IgnoreCase))
+            {
+                Kind = ECutsceneKind::Ending;
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ltts.Cutscene: unknown kind '%s' (Intro or Ending)."), *Args[0]);
+                return;
+            }
+
+            TSoftObjectPtr<UWorld> NextLevel;
+            if (Args.Num() > 1)
+            {
+                NextLevel = TSoftObjectPtr<UWorld>(FSoftObjectPath(Args[1]));
+            }
+
+            UI->PlayCutscene(Kind, NextLevel);
+        }));
 }
 
 
@@ -126,6 +177,12 @@ void UUIManagerSubsystem::ClearAllCachedWidgets()
 
     if (IsValid(AlertUIWidget))
         AlertUIWidget->RemoveFromParent();      AlertUIWidget = nullptr;
+
+    //[2026/09/17] 컷씬 위젯도 함께 지운다. 빠뜨리면 맵이 바뀐 뒤에도 포인터가 남아 ESC가 영영 막힌다.
+    //대기 중인 다음 레벨도 잊는다: 컷씬 도중 다른 이유로 맵이 바뀌었으면 그 흐름은 끝난 것이다.
+    if (IsValid(CutsceneWidget))
+        CutsceneWidget->RemoveFromParent();     CutsceneWidget = nullptr;
+    PendingLevelAfterCutscene.Reset();
 }
 
 void UUIManagerSubsystem::ApplyUIInputMode(bool bUIOnly)
@@ -331,40 +388,126 @@ void UUIManagerSubsystem::ShowAlertUI(FText message)
     }
 }
 
-void UUIManagerSubsystem::PlayCutscene(int32 cutscene)
+//[2026/09/17] 옛 경로. 위젯의 InitializeInt(정수 번호)에 재생을 맡겼다. ECutsceneKind 버전으로 대체.
+//void UUIManagerSubsystem::PlayCutscene(int32 cutscene)
+//{
+//    ULocalPlayer* LP = GetLocalPlayer();
+//    if (!LP)
+//        return;
+//
+//    UWorld* World = LP->GetWorld();
+//    if (!World)
+//        return;
+//
+//    APlayerController* PC = LP->GetPlayerController(World);
+//    if (!PC)
+//        return;
+//
+//
+//    const UUISettings* Settings = GetDefault<UUISettings>();
+//    UClass* WidgetClass = Settings->CutsceneWidget.LoadSynchronous();
+//    if (!WidgetClass)
+//    {
+//        UE_LOG(LogTemp, Warning,
+//            TEXT("[UIManager] 위젯 클래스가 지정되지 않았습니다. "));
+//        return;
+//    }
+//
+//    CutsceneWidget = CreateWidget<UUserWidget>(PC, WidgetClass);
+//    if (!CutsceneWidget)
+//        return;
+//
+//    CutsceneWidget->AddToViewport(100);   // Z 순서 높게
+//
+//    if (CutsceneWidget->GetClass()->ImplementsInterface(UUIInitializable::StaticClass()))
+//    {
+//        IUIInitializable::Execute_InitializeInt(CutsceneWidget, cutscene);
+//    }
+//}
+
+const UCutSceneDatabase* UUIManagerSubsystem::FindCutsceneDatabase(ECutsceneKind Kind)
 {
+    const UUISettings* Settings = GetDefault<UUISettings>();
+    if (!Settings)
+        return nullptr;
+
+    switch (Kind)
+    {
+    case ECutsceneKind::Intro:  return Settings->IntroCutscene.LoadSynchronous();
+    case ECutsceneKind::Ending: return Settings->EndingCutscene.LoadSynchronous();
+    default:                    return nullptr;
+    }
+}
+
+void UUIManagerSubsystem::PlayCutscene(ECutsceneKind Kind, TSoftObjectPtr<UWorld> NextLevel)
+{
+    if (IsCutscenePlaying())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[UIManager] Cutscene %s ignored: another cutscene is playing."),
+            *UEnum::GetValueAsString(Kind));
+        return;
+    }
+
     ULocalPlayer* LP = GetLocalPlayer();
-    if (!LP)
-        return;
-
-    UWorld* World = LP->GetWorld();
-    if (!World)
-        return;
-
-    APlayerController* PC = LP->GetPlayerController(World);
+    UWorld* World = LP ? LP->GetWorld() : nullptr;
+    APlayerController* PC = (LP && World) ? LP->GetPlayerController(World) : nullptr;
     if (!PC)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[UIManager] Cutscene %s ignored: no player controller."),
+            *UEnum::GetValueAsString(Kind));
         return;
+    }
 
+    ActiveCutscene = Kind;
+    PendingLevelAfterCutscene = NextLevel;
+
+    //새 게임의 시작. 지난 판에 본 가이드를 잊어 튜토리얼 팝업이 다시 뜬다(GameLoop.md 3.9).
+    if (Kind == ECutsceneKind::Intro)
+    {
+        if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(World))
+        {
+            Guide->ResetShownGuides();
+        }
+    }
 
     const UUISettings* Settings = GetDefault<UUISettings>();
-    UClass* WidgetClass = Settings->CutsceneWidget.LoadSynchronous();
-    if (!WidgetClass)
+    UClass* WidgetClass = Settings ? Settings->CutsceneWidget.LoadSynchronous() : nullptr;
+    const UCutSceneDatabase* Database = FindCutsceneDatabase(Kind);
+
+    //위젯이나 애셋이 빠져도 루프는 끊기지 않는다: 컷씬만 건너뛰고 다음 레벨로 간다.
+    if (!WidgetClass || !WidgetClass->IsChildOf(UCutSceneWidget::StaticClass()) || !Database)
     {
         UE_LOG(LogTemp, Warning,
-            TEXT("[UIManager] 위젯 클래스가 지정되지 않았습니다. "));
+            TEXT("[UIManager] Cutscene %s skipped: widget %s (must derive from CutSceneWidget), database %s. Check Project Settings > Game > UI Manager."),
+            *UEnum::GetValueAsString(Kind), *GetNameSafe(WidgetClass), *GetNameSafe(Database));
+        EndCutscene();
         return;
     }
 
-    CutsceneWidget = CreateWidget<UUserWidget>(PC, WidgetClass);
-    if (!CutsceneWidget)
-        return;
-
-    CutsceneWidget->AddToViewport(100);   // Z 순서 높게
-
-    if (CutsceneWidget->GetClass()->ImplementsInterface(UUIInitializable::StaticClass()))
+    UCutSceneWidget* Widget = CreateWidget<UCutSceneWidget>(PC, WidgetClass);
+    if (!Widget)
     {
-        IUIInitializable::Execute_InitializeInt(CutsceneWidget, cutscene);
+        UE_LOG(LogTemp, Warning, TEXT("[UIManager] Cutscene %s skipped: failed to create %s."),
+            *UEnum::GetValueAsString(Kind), *WidgetClass->GetName());
+        EndCutscene();
+        return;
     }
+
+    CutsceneWidget = Widget;
+    CutsceneWidget->AddToViewport(100);   //Z 순서 높게. 다른 UI(PathUI, 사이드 메뉴)를 덮는다.
+
+    UE_LOG(LogTemp, Display, TEXT("[UIManager] Cutscene %s starts; then %s."),
+        *UEnum::GetValueAsString(Kind),
+        NextLevel.IsNull() ? TEXT("stay in this level") : *NextLevel.ToSoftObjectPath().ToString());
+
+    //Play가 프레임이 비어 있어 곧바로 끝나면 OnFinished → EndCutscene이 여기서 동기로 불린다. 그래도 안전하다.
+    Widget->OnFinished.AddUniqueDynamic(this, &UUIManagerSubsystem::EndCutscene);
+    Widget->Play(Database);
+}
+
+bool UUIManagerSubsystem::IsCutscenePlaying() const
+{
+    return IsValid(CutsceneWidget);
 }
 
 #pragma endregion
@@ -404,11 +547,37 @@ void UUIManagerSubsystem::CallUIClosed()
 
 void UUIManagerSubsystem::EndCutscene()
 {
-    if (IsValid(CutsceneWidget))
+    //[2026/09/17] 위젯이 아직 재생 중이면(ESC·콘솔) 먼저 끝낸다. Finish는 OnFinished로 이 함수를 다시 부르지만
+    //그때는 위젯을 먼저 떼어 두었으므로 아래에서 아무것도 하지 않는다.
+    if (UCutSceneWidget* Widget = Cast<UCutSceneWidget>(CutsceneWidget))
+    {
+        CutsceneWidget = nullptr;
+        Widget->OnFinished.RemoveDynamic(this, &UUIManagerSubsystem::EndCutscene);
+        Widget->Skip();               //이미 끝났으면 아무것도 하지 않는다.
+        Widget->RemoveFromParent();   //NativeDestruct가 CallUIClosed를 한 번만 부른다.
+    }
+    else if (IsValid(CutsceneWidget))
     {
         CutsceneWidget->RemoveFromParent();
+        CutsceneWidget = nullptr;
     }
-    CutsceneWidget = nullptr;
+
+    //다음 레벨은 한 번만 연다. 방송보다 먼저 비워 두어, 방송을 받은 쪽이 다시 EndCutscene을 불러도 두 번 열리지 않는다.
+    const TSoftObjectPtr<UWorld> NextLevel = PendingLevelAfterCutscene;
+    PendingLevelAfterCutscene.Reset();
+
+    OnCutsceneEnded.Broadcast(ActiveCutscene);
+
+    if (!NextLevel.IsNull())
+    {
+        UE_LOG(LogTemp, Display, TEXT("[UIManager] Cutscene %s ended; opening %s."),
+            *UEnum::GetValueAsString(ActiveCutscene), *NextLevel.ToSoftObjectPath().ToString());
+        UGameplayStatics::OpenLevelBySoftObjectPtr(this, NextLevel);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Display, TEXT("[UIManager] Cutscene %s ended."), *UEnum::GetValueAsString(ActiveCutscene));
+    }
 }
 
 #pragma endregion
@@ -424,13 +593,30 @@ bool UUIManagerSubsystem::HandleEscapeKey()
     if (!World || !World->IsGameWorld())
         return false;
 
+    //[2026/09/17] 컷씬 중 ESC는 스킵이다. 타이틀 위의 시작 컷씬도 같으므로 컨트롤러 종류보다 먼저 본다.
+    //에디터에서는 아래와 같은 포커스 검사를 거친다.
+    if (IsCutscenePlaying())
+    {
+        if (GIsEditor)
+        {
+            const UGameViewportClient* Viewport = World->GetGameViewport();
+            const TSharedPtr<SViewport> ViewportWidget = Viewport ? Viewport->GetGameViewportWidget() : nullptr;
+            if (!ViewportWidget.IsValid() || !ViewportWidget->HasAnyUserFocusOrFocusedDescendants())
+                return false;
+        }
+
+        UE_LOG(LogTemp, Display, TEXT("[UIManager] Escape: cutscene skipped."));
+        EndCutscene();
+        return true;
+    }
+
     //타이틀(ATitleGameMode, 기본 APlayerController)처럼 그리드 플레이어 컨트롤러가 없는 레벨에는
     //재개·설정·가이드로 이뤄진 사이드 메뉴를 띄울 이유가 없다.
     APlayerController* PC = LP->GetPlayerController(World);
     if (!PC || !PC->IsA<AGridPlayerController>())
         return false;
 
-    //컷씬 위젯이 떠 있는 동안은 여닫지 않는다.
+    //컷씬 위젯이 떠 있는 동안은 여닫지 않는다(위에서 이미 스킵으로 처리했으므로 여기 오지 않는다).
     if (IsValid(CutsceneWidget))
         return false;
 
