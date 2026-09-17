@@ -9,6 +9,7 @@
 #include "Stage/StageTypes.h"
 #include "UIManagerSubsystem.generated.h"
 
+class IInputProcessor;
 class UStageSubsystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIOpen);
@@ -22,6 +23,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIClose);
  * AStageInfo::ZonePathUIIndices에서 그림 번호를 읽어 ShowOrRefreshPathUI를 부른다. 이 서브시스템은
  * 레벨을 넘어 살아남고 스테이지 서브시스템은 레벨마다 새로 생기므로, 맵이 열리거나 플레이어
  * 컨트롤러가 바뀔 때마다 풀고 다시 바인딩한다(Docs/StageZone.html 4절, Docs/Plans/UIConnection.md).
+ *
+ * [2026/09/17] ESC 토글: 슬레이트 입력 전처리기(EscapeProcessor)가 ESC를 받아 ToggleSideMenuUI를 부른다.
+ * 플레이어 컨트롤러의 입력 액션으로는 닫을 수 없다 -- 사이드 메뉴가 열리면 입력 모드가 UI 전용이 되어
+ * 게임 뷰포트가 키를 받지 않기 때문이다(HandleEscapeKey, UIConnection.md 11절).
  */
 UCLASS()
 class LETSTAKETHESUBWAY_API UUIManagerSubsystem : public ULocalPlayerSubsystem
@@ -58,6 +63,9 @@ private:
     /** CallUIOpened만큼 늘고 CallUIClosed만큼 준다. 0보다 크면 게임 입력을 막고 UI만 클릭된다. */
     int32 OpenUICount = 0;
 
+    /** ESC를 받아 사이드 메뉴를 여닫는 슬레이트 입력 전처리기. Initialize에서 등록하고 Deinitialize에서 뺀다. */
+    TSharedPtr<IInputProcessor> EscapeProcessor;
+
 #pragma endregion
 
 
@@ -91,8 +99,23 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UI")
     void ShowOrRefreshPathUI(int32 PathIndex);
 
-    UFUNCTION()
+    UFUNCTION(BlueprintCallable, Category = "UI")
     void ShowSideMenuUI();
+
+    /**
+     * [2026/09/17] 사이드 메뉴를 접는다. WBP_SideMenuUI의 닫기 버튼(CloseSideMenuUI → CallUIClosed)과 같은 순서로
+     * 위젯을 Collapsed로 두고 CallUIClosed를 부른다. 위젯은 없애지 않으므로 다음 ShowSideMenuUI가 그대로 다시 쓴다.
+     */
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void HideSideMenuUI();
+
+    /** 사이드 메뉴가 열려 있으면 접고, 접혀 있으면 연다. ESC가 이것을 부른다. */
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void ToggleSideMenuUI();
+
+    /** 사이드 메뉴 위젯이 만들어져 있고 보이는 상태인지. */
+    UFUNCTION(BlueprintPure, Category = "UI")
+    bool IsSideMenuOpen() const;
 
     UFUNCTION(BlueprintCallable, Category = "UI")
     void ShowGuidePopUpUI(EGuideType guide);
@@ -129,6 +152,21 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "CutScene")
     void EndCutscene();
+
+#pragma endregion
+
+
+#pragma region Input
+public:
+    /**
+     * [2026/09/17] ESC가 눌렸다(EscapeProcessor가 부른다). 사이드 메뉴를 여닫을 상황이면 토글하고 true를 돌려
+     * 키를 소비한다. false면 키는 원래대로 흘러간다(에디터에서는 PIE 정지 등).
+     *
+     * 게임 월드가 아니거나, 타이틀처럼 AGridPlayerController가 없는 레벨이거나, 컷씬 중이면 받지 않는다.
+     * 에디터에서는 PIE 뷰포트(또는 그 위의 위젯)에 포커스가 있을 때만 받아, 다른 패널에서 누른 ESC를
+     * 가로채지 않는다.
+     */
+    bool HandleEscapeKey();
 
 #pragma endregion
 

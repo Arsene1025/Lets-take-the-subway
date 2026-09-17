@@ -12,7 +12,53 @@
 #include "Stage/StageInfo.h"
 #include "Stage/StageSubsystem.h"
 #include "Engine/World.h"
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/IInputProcessor.h"
+#include "Framework/Application/SlateApplication.h"
+#include "InputCoreTypes.h"
+#include "Player/GridPlayerController.h"
 #include "TimerManager.h"
+#include "Widgets/SViewport.h"
+
+
+namespace
+{
+    /**
+     * [2026/09/17] ESC로 사이드 메뉴를 여닫기 위한 슬레이트 입력 전처리기.
+     *
+     * 플레이어 컨트롤러의 입력 액션으로는 안 된다: 사이드 메뉴가 열리면 입력 모드가 UI 전용
+     * (FInputModeUIOnly)이 되어 게임 뷰포트가 키를 받지 않으므로 닫는 ESC가 전달되지 않는다.
+     * 전처리기는 포커스와 입력 모드에 관계없이 슬레이트가 키를 나눠 주기 전에 먼저 받고,
+     * 처리했다고 답하면 위젯이나 에디터(PIE 정지)에는 전달되지 않는다. 판단은 전부
+     * UUIManagerSubsystem::HandleEscapeKey가 한다.
+     */
+    class FSideMenuEscapeProcessor : public IInputProcessor
+    {
+    public:
+        explicit FSideMenuEscapeProcessor(UUIManagerSubsystem* InOwner)
+            : Owner(InOwner)
+        {
+        }
+
+        virtual void Tick(const float DeltaTime, FSlateApplication& SlateApp, TSharedRef<ICursor> Cursor) override
+        {
+        }
+
+        virtual bool HandleKeyDownEvent(FSlateApplication& SlateApp, const FKeyEvent& InKeyEvent) override
+        {
+            if (InKeyEvent.GetKey() != EKeys::Escape || InKeyEvent.IsRepeat())
+                return false;
+
+            UUIManagerSubsystem* Manager = Owner.Get();
+            return Manager && Manager->HandleEscapeKey();
+        }
+
+        virtual const TCHAR* GetDebugName() const override { return TEXT("SideMenuEscape"); }
+
+    private:
+        TWeakObjectPtr<UUIManagerSubsystem> Owner;
+    };
+}
 
 
 #pragma region Helper
@@ -125,10 +171,23 @@ void UUIManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(
         this, &UUIManagerSubsystem::HandleMapLoaded);
+
+    //ESC 토글. 슬레이트가 없는 환경(커맨드렛, 전용 서버)에서는 등록하지 않는다.
+    if (FSlateApplication::IsInitialized())
+    {
+        EscapeProcessor = MakeShared<FSideMenuEscapeProcessor>(this);
+        FSlateApplication::Get().RegisterInputPreProcessor(EscapeProcessor);
+    }
 }
 
 void UUIManagerSubsystem::Deinitialize()
 {
+    if (EscapeProcessor.IsValid() && FSlateApplication::IsInitialized())
+    {
+        FSlateApplication::Get().UnregisterInputPreProcessor(EscapeProcessor);
+    }
+    EscapeProcessor.Reset();
+
     UnbindStage();
     FCoreUObjectDelegates::PostLoadMapWithWorld.RemoveAll(this);
     OnUIOpened.RemoveAll(this);
@@ -212,6 +271,34 @@ void UUIManagerSubsystem::ShowSideMenuUI()
             IUIInitializable::Execute_Initialize(W);
         }
     }
+}
+
+void UUIManagerSubsystem::HideSideMenuUI()
+{
+    if (!IsSideMenuOpen())
+        return;
+
+    //WBP_SideMenuUI의 닫기 버튼과 같은 순서: 접은 뒤 열린 UI 개수를 줄인다(0이 되면 게임 입력 모드로 복귀).
+    SideMenuUIWidget->SetVisibility(ESlateVisibility::Collapsed);
+    CallUIClosed();
+}
+
+void UUIManagerSubsystem::ToggleSideMenuUI()
+{
+    if (IsSideMenuOpen())
+    {
+        HideSideMenuUI();
+    }
+    else
+    {
+        ShowSideMenuUI();
+    }
+}
+
+bool UUIManagerSubsystem::IsSideMenuOpen() const
+{
+    //IsVisible: Visible·HitTestInvisible·SelfHitTestInvisible. Collapsed(닫힘)와 Hidden은 false.
+    return IsValid(SideMenuUIWidget) && SideMenuUIWidget->IsVisible();
 }
 
 void UUIManagerSubsystem::ShowGuidePopUpUI(EGuideType guide)
@@ -322,6 +409,45 @@ void UUIManagerSubsystem::EndCutscene()
         CutsceneWidget->RemoveFromParent();
     }
     CutsceneWidget = nullptr;
+}
+
+#pragma endregion
+
+
+
+#pragma region Input
+
+bool UUIManagerSubsystem::HandleEscapeKey()
+{
+    ULocalPlayer* LP = GetLocalPlayer();
+    UWorld* World = LP ? LP->GetWorld() : nullptr;
+    if (!World || !World->IsGameWorld())
+        return false;
+
+    //타이틀(ATitleGameMode, 기본 APlayerController)처럼 그리드 플레이어 컨트롤러가 없는 레벨에는
+    //재개·설정·가이드로 이뤄진 사이드 메뉴를 띄울 이유가 없다.
+    APlayerController* PC = LP->GetPlayerController(World);
+    if (!PC || !PC->IsA<AGridPlayerController>())
+        return false;
+
+    //컷씬 위젯이 떠 있는 동안은 여닫지 않는다.
+    if (IsValid(CutsceneWidget))
+        return false;
+
+    //에디터에서는 PIE 뷰포트(또는 그 위에 올린 위젯)에 포커스가 있을 때만 받는다. 다른 패널에서 누른
+    //ESC는 원래대로 에디터가 처리한다(이름 바꾸기 취소, PIE 정지 등).
+    if (GIsEditor)
+    {
+        const UGameViewportClient* Viewport = World->GetGameViewport();
+        const TSharedPtr<SViewport> ViewportWidget = Viewport ? Viewport->GetGameViewportWidget() : nullptr;
+        if (!ViewportWidget.IsValid() || !ViewportWidget->HasAnyUserFocusOrFocusedDescendants())
+            return false;
+    }
+
+    ToggleSideMenuUI();
+
+    UE_LOG(LogTemp, Display, TEXT("[UIManager] Escape: side menu %s."), IsSideMenuOpen() ? TEXT("opened") : TEXT("closed"));
+    return true;
 }
 
 #pragma endregion

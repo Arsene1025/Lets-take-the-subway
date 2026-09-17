@@ -30,6 +30,11 @@ APuzzleElevatorBlock::APuzzleElevatorBlock()
 	// 그대로 빠져나간다.
 	bParkOnFloorTile = true;
 
+	// 판정(풋프린트·BodyMesh·도킹)은 4x4 그대로 두고 아트(BP_elevator)만 0.9로 그린다(2026-09-17).
+	// 4 m 판 위에 꽉 찬 차체가 회전판·구조물·이웃 조각과 맞닿아 보이는 것을 피한다. 원점이
+	// 풋프린트 중심의 바닥이라 바닥에 붙은 채 사방 20 cm씩 안으로 들어온다.
+	ArtScale = FVector(0.9);
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
 	// 다른 그레이박스 머티리얼을 쓴다. 문은 이 블록이 어느 쪽으로 움직일 수 있는지
