@@ -6,6 +6,7 @@
 #include "Engine/DeveloperSettings.h"
 #include "Blueprint/UserWidget.h"
 #include "Guide/GuideDatabase.h"
+#include "CutScene/CutSceneDatabase.h"
 #include "UISettings.generated.h"
 
 /**
@@ -40,5 +41,13 @@ public:
 
     UPROPERTY(Config, EditAnywhere, Category = "Data")
     TSoftObjectPtr<UGuideDatabase> GuideDatabase;
+
+    /** [2026/09/17] 시작 컷씬(타이틀 → 튜토리얼) 그림. UUIManagerSubsystem::PlayCutscene(Intro)이 쓴다. */
+    UPROPERTY(Config, EditAnywhere, Category = "Data")
+    TSoftObjectPtr<UCutSceneDatabase> IntroCutscene;
+
+    /** [2026/09/17] 엔딩 컷씬(Stage2 → 타이틀) 그림. PlayCutscene(Ending)이 쓴다. */
+    UPROPERTY(Config, EditAnywhere, Category = "Data")
+    TSoftObjectPtr<UCutSceneDatabase> EndingCutscene;
 
 };

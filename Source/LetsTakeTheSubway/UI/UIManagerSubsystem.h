@@ -6,14 +6,19 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Guide/GuideType.h"
+#include "CutScene/CutSceneDatabase.h"
 #include "Stage/StageTypes.h"
 #include "UIManagerSubsystem.generated.h"
 
 class IInputProcessor;
 class UStageSubsystem;
+class UWorld;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIOpen);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIClose);
+
+/** 컷씬이 끝났다(스킵 포함). 다음 레벨을 열기 직전에 한 번 온다. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCutsceneEnded, ECutsceneKind, Kind);
 
 
 /**
@@ -50,6 +55,12 @@ private:
 
     UPROPERTY(Transient)
     TObjectPtr<UUserWidget> CutsceneWidget;
+
+    /** [2026/09/17] 컷씬이 끝나면 열 레벨. 비어 있으면 레벨을 바꾸지 않는다. EndCutscene이 비운다. */
+    TSoftObjectPtr<UWorld> PendingLevelAfterCutscene;
+
+    /** 지금 재생 중인(또는 마지막으로 재생한) 컷씬. OnCutsceneEnded에 실어 보낸다. */
+    ECutsceneKind ActiveCutscene = ECutsceneKind::Intro;
 
     /** 바인딩한 스테이지 서브시스템. 레벨과 함께 사라지므로 약참조로 든다.   */
     TWeakObjectPtr<UStageSubsystem> BoundStage;
@@ -123,8 +134,31 @@ public:
     UFUNCTION()
     void ShowAlertUI(FText message);
 
-    UFUNCTION()
-    void PlayCutscene(int32 cutscene);
+    //[2026/09/17] 정수 번호로 위젯의 InitializeInt를 부르던 옛 경로. 재생 논리가 UCutSceneWidget으로 옮겨 가며
+    //ECutsceneKind 버전으로 바꿨다. 호출하는 곳이 없어 주석으로 남긴다.
+    //UFUNCTION()
+    //void PlayCutscene(int32 cutscene);
+
+    /**
+     * [2026/09/17] 컷씬을 띄우고, 끝나면(스킵 포함) NextLevel을 연다. NextLevel이 비어 있으면 레벨을 바꾸지 않는다.
+     *
+     * 데이터 애셋은 UUISettings(IntroCutscene / EndingCutscene)에서 찾고, 위젯은 UUISettings::CutsceneWidget이다.
+     * 위젯이 UCutSceneWidget이 아니거나(재부모화 전) 애셋이 비어 있으면 경고를 남기고 곧바로 EndCutscene한다.
+     * 컷씬이 빠져도 루프는 끊기지 않는다. 이미 재생 중이면 무시한다.
+     *
+     * Intro는 새 게임의 시작이므로 UGuideDataSubsystem::ResetShownGuides도 부른다(두 번째 판에도 가이드가 뜬다).
+     *
+     * 타이틀(WBP_MainUI 시작 버튼)과 엔딩 볼륨(ACutsceneCellTrigger)이 부른다. Docs/Plans/GameLoop.md.
+     */
+    UFUNCTION(BlueprintCallable, Category = "CutScene")
+    void PlayCutscene(ECutsceneKind Kind, TSoftObjectPtr<UWorld> NextLevel);
+
+    /** 컷씬 위젯이 떠 있는지. */
+    UFUNCTION(BlueprintPure, Category = "CutScene")
+    bool IsCutscenePlaying() const;
+
+    UPROPERTY(BlueprintAssignable, Category = "CutScene")
+    FOnCutsceneEnded OnCutsceneEnded;
 
 #pragma endregion
 
@@ -150,6 +184,12 @@ public:
     bool IsUIOpen() const { return OpenUICount > 0; }
 
 
+    /**
+     * 컷씬을 끝낸다. 위젯의 OnFinished(재생 완료·스킵)가 부르고, ESC와 콘솔도 부른다.
+     *
+     * 위젯을 지우고 OnCutsceneEnded를 보낸 뒤, PlayCutscene에 받아 둔 NextLevel이 있으면 연다.
+     * 두 번 불려도 레벨을 두 번 열지 않는다(열기 전에 대기 레벨을 비운다).
+     */
     UFUNCTION(BlueprintCallable, Category = "CutScene")
     void EndCutscene();
 
@@ -212,6 +252,9 @@ private:
     void HandleMapLoaded(UWorld* NewWorld);
 
     void ClearAllCachedWidgets();
+
+    /** [2026/09/17] Kind에 맞는 컷씬 데이터 애셋을 UUISettings에서 동기 로드한다. 없으면 null. */
+    static const UCutSceneDatabase* FindCutsceneDatabase(ECutsceneKind Kind);
 
     /** true면 UI 전용 입력, false면 게임 입력(AGridPlayerController::BeginPlay와 같은 설정)으로 바꾼다. */
     void ApplyUIInputMode(bool bUIOnly);
