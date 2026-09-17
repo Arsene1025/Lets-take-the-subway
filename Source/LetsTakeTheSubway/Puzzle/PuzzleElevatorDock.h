@@ -72,6 +72,33 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Elevator Dock")
 	EGridDirection ExitDirection = EGridDirection::East;
 
+	/**
+	 * 다른 층에서 온 차체가 이 구조물 층에 도착해 플레이어가 내린 뒤 걸어갈 셀(2026-09-17).
+	 * (-1,-1)이면 지금처럼 자동 -- 문 앞 칸 중 좌석에 가장 가까운 칸.
+	 *
+	 * 선택 사항이다. 문 앞이 막혀 있거나 내린 자리가 어색할 때 디자이너가 자리를 정해 준다.
+	 * 문 앞 칸이면 바로 그리로 내리고, 멀리 있는 칸이면 문 앞에 내린 뒤 길찾기로 걸어간다
+	 * (벽을 뚫고 직진하지 않게). 걷는 도중 플레이어가 클릭하면 그 클릭이 이긴다.
+	 *
+	 * 걸을 수 없는 칸이거나 이 구조물 층이 아니면 경고를 남기고 자동으로 물러선다.
+	 * ArrivalGuide와 같은 자리에 적는다 -- 도착 층의 일은 도착 층 구조물이 안다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Elevator Dock")
+	FIntPoint ArrivalCell = FIntPoint(-1, -1);
+
+	/**
+	 * ArrivalCell을 셀 번호 대신 액터로 찍는 방법. 레벨에 Target Point 같은 액터를 놓고 여기에
+	 * 끌어다 놓으면 그 액터가 서 있는 셀을 쓴다. 둘 다 있으면 이쪽이 이긴다.
+	 *
+	 * Grid Cell Marker는 쓰지 말 것 -- 그 액터는 셀 타입을 덮어쓴다(기본값 Blocked).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Elevator Dock")
+	TObjectPtr<AActor> ArrivalAnchor;
+
+	/** ArrivalAnchor/ArrivalCell이 어느 셀로 풀리고 이 층에서 쓸 수 있는지 로그로 확인한다. */
+	UFUNCTION(CallInEditor, Category = "Elevator Dock", meta = (DisplayName = "Log Arrival Cell"))
+	void LogArrivalCell();
+
 	UPROPERTY(EditAnywhere, Category = "Elevator Dock", meta = (ClampMin = 1.0))
 	float TravelSpeed = 200.0f;
 
@@ -291,6 +318,13 @@ private:
 	/** 도착 층(이 구조물 쪽)에서 차체 문 앞의 내릴 자리. 없으면 false. */
 	bool FindArrivalExit(const APuzzleElevatorBlock& Elevator, double TargetZ,
 		const FVector& SeatWorld, FVector& OutWorld) const;
+
+	/**
+	 * 디자이너가 정한 도착 셀(ArrivalAnchor 우선, 없으면 ArrivalCell)을 FloorZ 층에서 쓸 수
+	 * 있는지 확인해 돌려준다. 아무것도 적지 않았으면 조용히 false, 적었는데 못 쓰면 경고를
+	 * 남기고 false.
+	 */
+	bool ResolveArrivalCell(double FloorZ, FIntPoint& OutCell) const;
 
 	/** 지금 완전히 올라와 있는 엘리베이터를 다시 찾는다. */
 	APuzzleElevatorBlock* FindElevatorOnTop() const;
