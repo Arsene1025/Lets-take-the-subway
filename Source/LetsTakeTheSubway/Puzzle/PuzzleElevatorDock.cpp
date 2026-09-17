@@ -408,6 +408,16 @@ bool APuzzleElevatorDock::FindArrivalExit(
 	TArray<FIntPoint> FrontCells;
 	Elevator.GetDoorFrontCells(FrontCells);
 
+	// 디자이너가 정한 도착 셀이 문 앞 칸이면 그리로 곧장 내린다(2026-09-17). 문 앞이 아니면
+	// 여기서는 쓰지 않는다 -- 내리는 걸음은 직선이라 멀리 있는 칸은 HandleArrived가 길찾기로
+	// 보낸다.
+	FIntPoint Chosen;
+	if (ResolveArrivalCell(TargetZ, Chosen) && FrontCells.Contains(Chosen))
+	{
+		OutWorld = CurrentGrid->CellToWorld(Chosen);
+		return true;
+	}
+
 	bool bFound = false;
 	double BestDistanceSq = TNumericLimits<double>::Max();
 
@@ -434,6 +444,49 @@ bool APuzzleElevatorDock::FindArrivalExit(
 	}
 
 	return bFound;
+}
+
+bool APuzzleElevatorDock::ResolveArrivalCell(double FloorZ, FIntPoint& OutCell) const
+{
+	const AGridActor* CurrentGrid = GetGrid();
+	if (!CurrentGrid)
+	{
+		return false;
+	}
+
+	// 액터가 있으면 셀 번호를 세지 않아도 된다. 둘 다 있으면 액터가 이긴다.
+	FIntPoint Cell = ArrivalCell;
+	if (const AActor* Anchor = ArrivalAnchor.Get())
+	{
+		Cell = CurrentGrid->WorldToCell(Anchor->GetActorLocation());
+	}
+	else if (!CurrentGrid->IsValidCell(Cell))
+	{
+		// 아무것도 적지 않았다(기본값 -1,-1). 자동 규칙으로 간다.
+		return false;
+	}
+
+	const FGridCellData* Data = CurrentGrid->GetCell(Cell);
+	if (!Data || !CurrentGrid->IsCellWalkableStatic(Cell))
+	{
+		UE_LOG(LogLTTSGrid, Warning,
+			TEXT("%s: arrival cell (%d,%d) is not walkable; falling back to the nearest door cell."),
+			*GetName(), Cell.X, Cell.Y);
+		return false;
+	}
+
+	// 층이 다르면 이 도착에는 해당하지 않는다. 짝을 이룬 구조물은 각자 자기 층의 셀만 적으므로
+	// 보통은 저작 실수이고, 구버전 단일 구조물은 왕복 중 한쪽 층에서만 맞는 것이 정상이다.
+	if (!FMath::IsNearlyEqual(Data->FloorZ, FloorZ, 10.0))
+	{
+		UE_LOG(LogLTTSGrid, Warning,
+			TEXT("%s: arrival cell (%d,%d) sits at Z %.0f, not on the arrival floor Z %.0f; ignoring it."),
+			*GetName(), Cell.X, Cell.Y, Data->FloorZ, FloorZ);
+		return false;
+	}
+
+	OutCell = Cell;
+	return true;
 }
 
 bool APuzzleElevatorDock::FindExitWorld(
@@ -624,9 +677,15 @@ bool APuzzleElevatorDock::TryLaunch(AGridPawn* Pawn, FText* OutReason)
 		return false;
 	}
 
-	// 도착 가이드(2026-09-16). 어느 쪽에도 가이드가 없으면 바인딩하지 않는다.
+	// 도착 가이드(2026-09-16)와 도착 셀(2026-09-17). 어느 쪽에도 둘 다 없으면 바인딩하지 않는다.
 	const APuzzleElevatorDock* Partner = GetTargetDock();
-	if (ArrivalGuide != EGuideType::None || (Partner && Partner->ArrivalGuide != EGuideType::None))
+	const auto HasArrivalWork = [](const APuzzleElevatorDock& Dock)
+	{
+		return Dock.ArrivalGuide != EGuideType::None
+			|| Dock.ArrivalAnchor != nullptr
+			|| Dock.ArrivalCell != FIntPoint(-1, -1);
+	};
+	if (HasArrivalWork(*this) || (Partner && HasArrivalWork(*Partner)))
 	{
 		Elevator->OnArrived.AddUniqueDynamic(this, &APuzzleElevatorDock::HandleArrived);
 	}
@@ -662,7 +721,8 @@ void APuzzleElevatorDock::HandleArrived(APuzzleElevatorBlock* Elevator, APawn* P
 	Elevator->OnArrived.RemoveDynamic(this, &APuzzleElevatorDock::HandleArrived);
 
 	// 승객이 사라지는 등 중간에 끝난 이동이면 폰이 없다. 플레이어가 실제로 내렸을 때만 띄운다.
-	if (!Cast<AGridPawn>(Pawn))
+	AGridPawn* GridPawn = Cast<AGridPawn>(Pawn);
+	if (!GridPawn)
 	{
 		return;
 	}
@@ -678,14 +738,29 @@ void APuzzleElevatorDock::HandleArrived(APuzzleElevatorBlock* Elevator, APawn* P
 		Arrival = Partner;
 	}
 
-	if (!Arrival || Arrival->ArrivalGuide == EGuideType::None)
+	if (!Arrival)
 	{
 		return;
 	}
 
-	if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+	if (Arrival->ArrivalGuide != EGuideType::None)
 	{
-		Guide->RequestGuide(Arrival->ArrivalGuide);
+		if (UGuideDataSubsystem* Guide = UGuideDataSubsystem::Get(this))
+		{
+			Guide->RequestGuide(Arrival->ArrivalGuide);
+		}
+	}
+
+	// 디자이너가 정한 도착 셀(2026-09-17). 폰은 이미 문 앞에 내려 그리드 위에 서 있으므로
+	// 여기서부터는 평소의 길찾기다 -- 벽과 블록을 돌아가고, 플레이어가 클릭하면 그쪽이 이긴다.
+	// 문 앞 칸을 골랐다면 FindArrivalExit가 이미 거기에 내려 줬으니 걸을 것이 없다.
+	FIntPoint Cell;
+	if (Arrival->ResolveArrivalCell(Elevator->GetFloorZ(), Cell) && GridPawn->GetCurrentCell() != Cell)
+	{
+		UE_LOG(LogLTTSGrid, Display,
+			TEXT("%s: walking %s on to arrival cell (%d,%d)."),
+			*Arrival->GetName(), *GridPawn->GetName(), Cell.X, Cell.Y);
+		GridPawn->RequestMoveToCell(Cell);
 	}
 }
 
@@ -767,6 +842,44 @@ bool APuzzleElevatorDock::IsBusy() const
 }
 
 // ---------------------------------------------------------------------------- 에디터
+
+void APuzzleElevatorDock::LogArrivalCell()
+{
+#if WITH_EDITOR
+	const AGridActor* CurrentGrid = AGridActor::FindGrid(GetWorld());
+	if (!CurrentGrid)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: no AGridActor in the level."), *GetName());
+		return;
+	}
+
+	FIntPoint Cell = ArrivalCell;
+	if (const AActor* Anchor = ArrivalAnchor.Get())
+	{
+		Cell = CurrentGrid->WorldToCell(Anchor->GetActorLocation());
+	}
+	else if (!CurrentGrid->IsValidCell(Cell))
+	{
+		UE_LOG(LogLTTSGrid, Display, TEXT("%s: no arrival cell set; the rider steps off at the nearest door cell."), *GetName());
+		return;
+	}
+
+	const FGridCellData* Data = CurrentGrid->GetCell(Cell);
+	if (!Data)
+	{
+		UE_LOG(LogLTTSGrid, Warning, TEXT("%s: arrival cell (%d,%d) is outside the grid."), *GetName(), Cell.X, Cell.Y);
+		return;
+	}
+
+	// 에디터에서는 아직 층(PivotWorld)이 정해지지 않았을 수 있어 배치된 Z와 비교한다.
+	const FString Type = StaticEnum<EGridCellType>()->GetNameStringByValue(static_cast<int64>(Data->Type));
+	UE_LOG(LogLTTSGrid, Display,
+		TEXT("%s: arrival cell (%d,%d) is %s at Z %.0f (dock placed at Z %.0f)%s%s."),
+		*GetName(), Cell.X, Cell.Y, *Type, Data->FloorZ, GetActorLocation().Z,
+		CurrentGrid->IsCellWalkableStatic(Cell) ? TEXT("") : TEXT(" -- NOT walkable"),
+		FMath::Abs(Data->FloorZ - GetActorLocation().Z) > 150.0 ? TEXT(" -- probably a different floor") : TEXT(""));
+#endif
+}
 
 void APuzzleElevatorDock::DetectTargetFloor()
 {
